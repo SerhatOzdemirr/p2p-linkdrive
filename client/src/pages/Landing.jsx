@@ -1,33 +1,44 @@
 // pages/Landing.jsx
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { generateHex } from '../core/crypto.js'
 
 export default function Landing() {
-  const navigate = useNavigate()
-  const [joinId, setJoinId]   = useState('')
-  const [error, setError]     = useState('')
+  const [joinInput, setJoinInput] = useState('')
+  const [error, setError]         = useState('')
 
   function handleCreate() {
-    const roomId    = generateHex(16)  // 32 hex char
-    const secretKey = generateHex(32)  // 64 hex char → 256-bit AES key
-    // URL: /room/{roomId}#{secretKey}
-    // # fragment sunucuya HTTP isteğinde gitmez — Zero-Knowledge
-    navigate(`/room/${roomId}#${secretKey}`)
+    const roomId    = generateHex(16) // 32 hex char
+    const secretKey = generateHex(32) // 64 hex char = 256-bit AES key
+
+    // window.location ile git — React Router navigate() hash'i strip ediyor!
+    window.location.href = `/room/${roomId}#${secretKey}`
   }
 
   function handleJoin(e) {
     e.preventDefault()
     setError('')
-    // Linkin tamamını yapıştırmayı destekle
+
+    const raw = joinInput.trim()
+    if (!raw) return
+
     try {
-      const url   = new URL(joinId.includes('://') ? joinId : `http://x/${joinId}`)
-      const parts = url.pathname.split('/room/')
-      if (parts.length < 2) throw new Error()
-      const roomId = parts[1].replace(/\/$/, '')
-      const secret = url.hash.slice(1)
-      if (!roomId || !secret) throw new Error()
-      navigate(`/room/${roomId}#${secret}`)
+      // Tam URL veya sadece /room/xxx#yyy formatını destekle
+      let roomId, secretKey
+
+      if (raw.includes('/room/')) {
+        const afterRoom = raw.split('/room/')[1]         // "abc123#key456"
+        const hashIdx   = afterRoom.indexOf('#')
+        if (hashIdx === -1) throw new Error('hash yok')
+        roomId    = afterRoom.slice(0, hashIdx)
+        secretKey = afterRoom.slice(hashIdx + 1)
+      } else {
+        throw new Error('format hatalı')
+      }
+
+      if (!roomId || !secretKey) throw new Error('eksik')
+
+      // window.location ile git — hash korunur
+      window.location.href = `/room/${roomId}#${secretKey}`
     } catch {
       setError('Geçersiz link. Tam URL\'yi yapıştır.')
     }
@@ -36,7 +47,6 @@ export default function Landing() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 gap-12">
 
-      {/* Logo */}
       <div className="text-center">
         <h1 className="text-4xl font-bold tracking-tight text-white">
           P2P <span className="text-emerald-400">LinkDrive</span>
@@ -46,10 +56,8 @@ export default function Landing() {
         </p>
       </div>
 
-      {/* Kartlar */}
       <div className="w-full max-w-md flex flex-col gap-4">
 
-        {/* Oda Oluştur */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
           <h2 className="text-lg font-semibold mb-1">Klasör Paylaş</h2>
           <p className="text-gray-400 text-sm mb-4">
@@ -63,7 +71,6 @@ export default function Landing() {
           </button>
         </div>
 
-        {/* Odaya Katıl */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
           <h2 className="text-lg font-semibold mb-1">Odaya Katıl</h2>
           <p className="text-gray-400 text-sm mb-4">
@@ -71,8 +78,8 @@ export default function Landing() {
           </p>
           <form onSubmit={handleJoin} className="flex flex-col gap-3">
             <input
-              value={joinId}
-              onChange={(e) => setJoinId(e.target.value)}
+              value={joinInput}
+              onChange={(e) => setJoinInput(e.target.value)}
               placeholder="http://localhost:5173/room/abc...#key..."
               className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
             />
