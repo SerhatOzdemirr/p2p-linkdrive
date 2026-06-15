@@ -60,7 +60,10 @@ export function generateHex(byteLength = 16) {
 
 /** ArrayBuffer → base64 string (DataChannel JSON taşıma için) */
 export function bufToBase64(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
 }
 
 /** base64 string → ArrayBuffer */

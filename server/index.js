@@ -19,21 +19,51 @@ const io = new Server(server, {
 // Sağlık kontrolü
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: Date.now() }));
 
+const ROOM_ID_RE = /^[0-9a-f]{32,64}$/i
+
+// Basit per-socket rate limiter: pencere başına max N event
+const socketRates = new Map()
+function isRateLimited(socketId, max = 30) {
+  const now = Date.now()
+  let e = socketRates.get(socketId)
+  if (!e || now > e.resetAt) e = { count: 0, resetAt: now + 1000 }
+  e.count++
+  socketRates.set(socketId, e)
+  return e.count > max
+}
+
 io.on('connection', (socket) => {
   console.log(`[+] Bağlandı: ${socket.id}`);
 
   // ── Oda oluştur ─────────────────────────────────────────────────────────
   socket.on('create_room', ({ roomId }) => {
+    if (isRateLimited(socket.id)) return;
+    if (!roomId || !ROOM_ID_RE.test(roomId)) return;
+
     const result = createRoom(roomId, socket.id);
     if (result.ok) {
       socket.join(roomId);
       socket.emit('room_created', { roomId });
       console.log(`[Room] Oluşturuldu: ${roomId} by ${socket.id}`);
+      return;
+    }
+    if (result.error === 'room_exists') {
+      const joinResult = joinRoom(roomId, socket.id);
+      if (joinResult.error === 'room_full') {
+        socket.emit('error', { code: 'ROOM_FULL' });
+        return;
+      }
+      socket.join(roomId);
+      io.to(roomId).emit('peer_joined', { peerCount: joinResult.peerCount });
+      console.log(`[Room] Katıldı (guest): ${socket.id} → ${roomId}`);
     }
   });
 
   // ── Odaya katıl ──────────────────────────────────────────────────────────
   socket.on('join_room', ({ roomId }) => {
+    if (isRateLimited(socket.id)) return;
+    if (!roomId || !ROOM_ID_RE.test(roomId)) return;
+
     const result = joinRoom(roomId, socket.id);
 
     if (result.error === 'room_not_found') {
@@ -46,24 +76,29 @@ io.on('connection', (socket) => {
     }
 
     socket.join(roomId);
-    // Her iki tarafa da bildir
     io.to(roomId).emit('peer_joined', { peerCount: result.peerCount });
     console.log(`[Room] Katıldı: ${socket.id} → ${roomId}`);
   });
 
   // ── WebRTC Sinyalleşme (kör iletim — içerik okunmaz) ────────────────────
   socket.on('offer', ({ roomId, offer }) => {
+    if (isRateLimited(socket.id)) return;
+    if (!roomId || !ROOM_ID_RE.test(roomId)) return;
     const other = getOtherPeer(roomId, socket.id);
     if (other) io.to(other).emit('offer', { offer });
   });
 
   socket.on('answer', ({ roomId, answer }) => {
+    if (isRateLimited(socket.id)) return;
+    if (!roomId || !ROOM_ID_RE.test(roomId)) return;
     const other = getOtherPeer(roomId, socket.id);
     if (other) io.to(other).emit('answer', { answer });
   });
 
   // Trickle ICE — adaylar geldiği anda ilet (toplu değil)
   socket.on('ice_candidate', ({ roomId, candidate }) => {
+    if (isRateLimited(socket.id)) return;
+    if (!roomId || !ROOM_ID_RE.test(roomId)) return;
     const other = getOtherPeer(roomId, socket.id);
     if (other) io.to(other).emit('ice_candidate', { candidate });
   });
@@ -72,6 +107,7 @@ io.on('connection', (socket) => {
   socket.on('leave_room', () => handleLeave(socket));
   socket.on('disconnect', () => {
     console.log(`[-] Ayrıldı: ${socket.id}`);
+    socketRates.delete(socket.id);
     handleLeave(socket);
   });
 });

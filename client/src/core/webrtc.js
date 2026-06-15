@@ -3,8 +3,15 @@
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  // Faz 3: TURN eklenecek
 ]
+
+const TURN_URL  = import.meta.env.VITE_TURN_URL
+const TURN_USER = import.meta.env.VITE_TURN_USER
+const TURN_PASS = import.meta.env.VITE_TURN_PASS
+
+if (TURN_URL && TURN_USER && TURN_PASS) {
+  ICE_SERVERS.push({ urls: TURN_URL, username: TURN_USER, credential: TURN_PASS })
+}
 
 /**
  * Peer bağlantısı yöneticisi.

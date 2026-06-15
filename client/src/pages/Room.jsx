@@ -3,10 +3,11 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { connectSocket, disconnectSocket } from '../core/signalling.js'
 import { PeerConnection } from '../core/webrtc.js'
-import { deriveKey } from '../core/crypto.js'
+import { deriveKey, encrypt, decrypt } from '../core/crypto.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
 import MessageTest from '../components/MessageTest.jsx'
+import FileTransfer from '../components/FileTransfer.jsx'
 
 export default function Room() {
   const { roomId } = useParams()
@@ -21,14 +22,22 @@ export default function Room() {
   const [messages, setMessages]   = useState([])
   const [fatalErr, setFatalErr]   = useState(null)
 
-  const peerRef   = useRef(null)
-  const socketRef = useRef(null)
-  const roleRef   = useRef(null)
-  const dcRef     = useRef(null)
+  const peerRef         = useRef(null)
+  const socketRef       = useRef(null)
+  const roleRef         = useRef(null)
+  const dcRef           = useRef(null)
+  const keyRef          = useRef(null)
+  const fileHandlerRef  = useRef(null)
 
   const addMsg = useCallback((text, from = 'system') => {
     setMessages(prev => [...prev, { text, from, ts: Date.now() }])
   }, [])
+
+  async function sendEncrypted(dc, msg) {
+    const encoded = new TextEncoder().encode(JSON.stringify(msg))
+    const buf = await encrypt(keyRef.current, encoded)
+    dc.send(buf)
+  }
 
   function setupDC(dc) {
     dcRef.current = dc
@@ -42,17 +51,20 @@ export default function Room() {
       setDcReady(false)
       addMsg('DataChannel kapandı.')
     }
-    dc.onmessage = (e) => {
+    dc.onmessage = async (e) => {
       try {
-        const msg = JSON.parse(e.data)
+        const plain = await decrypt(keyRef.current, e.data)
+        const msg = JSON.parse(new TextDecoder().decode(plain))
         if (msg.type === 'PING') {
           addMsg(`← PING: "${msg.text}"`, 'peer')
-          dc.send(JSON.stringify({ type: 'PONG', text: msg.text }))
+          await sendEncrypted(dc, { type: 'PONG', text: msg.text })
         } else if (msg.type === 'PONG') {
           addMsg(`← PONG: "${msg.text}"`, 'peer')
+        } else if (msg.type?.startsWith('FILE_')) {
+          await fileHandlerRef.current?.(msg)
         }
       } catch {
-        addMsg(`← binary (${e.data?.byteLength ?? '?'} bytes)`, 'peer')
+        addMsg(`← şifreli veri çözülemedi`, 'peer')
       }
     }
 
@@ -74,7 +86,7 @@ export default function Room() {
 
     async function init() {
       try {
-        await deriveKey(key)
+        keyRef.current = await deriveKey(key)
         addMsg('✓ AES-GCM 256-bit anahtar türetildi.')
       } catch {
         setFatalErr('Geçersiz şifreleme anahtarı.')
@@ -213,12 +225,19 @@ export default function Room() {
         <ShareLink roomId={roomId} secretKey={secretKey.current} />
       )}
 
+      <FileTransfer
+        dcReady={dcReady}
+        dcRef={dcRef}
+        send={(msg) => sendEncrypted(dcRef.current, msg)}
+        onRegisterHandler={(handler) => { fileHandlerRef.current = handler }}
+      />
+
       <MessageTest
         dcReady={dcReady}
         messages={messages}
-        onSend={(text) => {
+        onSend={async (text) => {
           if (dcRef.current?.readyState === 'open') {
-            dcRef.current.send(JSON.stringify({ type: 'PING', text }))
+            await sendEncrypted(dcRef.current, { type: 'PING', text })
             addMsg(`→ PING: "${text}"`, 'self')
           }
         }}
