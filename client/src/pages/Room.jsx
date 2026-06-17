@@ -1,200 +1,26 @@
 // pages/Room.jsx
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { connectSocket, disconnectSocket } from '../core/signalling.js'
-import { PeerConnection } from '../core/webrtc.js'
-import { deriveKey, encrypt, decrypt } from '../core/crypto.js'
+import { useRoom } from '../hooks/useRoom.js'
+import { useFileTransfer } from '../hooks/useFileTransfer.js'
+import { useClipboard } from '../hooks/useClipboard.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
 import MessageTest from '../components/MessageTest.jsx'
 import FileTransfer from '../components/FileTransfer.jsx'
+import ClipboardShare from '../components/ClipboardShare.jsx'
 
 export default function Room() {
   const { roomId } = useParams()
+  const secretKey  = useRef(window.location.hash.slice(1)).current
 
-  // Hash'i component mount anında bir kere oku ve sabitle
-  // useRef kullanıyoruz çünkü render'lar arasında değişmemeli
-  const secretKey = useRef(window.location.hash.slice(1))
+  const {
+    role, connState, dcReady, fatalErr,
+    messages, dcRef, sendEncrypted, registerMessageHandler, sendPing,
+  } = useRoom(roomId, secretKey)
 
-  const [role, setRole]           = useState(null)
-  const [connState, setConnState] = useState('idle')
-  const [dcReady, setDcReady]     = useState(false)
-  const [messages, setMessages]   = useState([])
-  const [fatalErr, setFatalErr]   = useState(null)
-
-  const peerRef         = useRef(null)
-  const socketRef       = useRef(null)
-  const roleRef         = useRef(null)
-  const dcRef           = useRef(null)
-  const keyRef          = useRef(null)
-  const fileHandlerRef  = useRef(null)
-
-  const addMsg = useCallback((text, from = 'system') => {
-    setMessages(prev => [...prev, { text, from, ts: Date.now() }])
-  }, [])
-
-  async function sendEncrypted(dc, msg) {
-    const encoded = new TextEncoder().encode(JSON.stringify(msg))
-    const buf = await encrypt(keyRef.current, encoded)
-    dc.send(buf)
-  }
-
-  function setupDC(dc) {
-    dcRef.current = dc
-    dc.binaryType = 'arraybuffer'
-
-    dc.onopen = () => {
-      setDcReady(true)
-      addMsg('✓ DataChannel açık — bağlantı hazır!')
-    }
-    dc.onclose = () => {
-      setDcReady(false)
-      addMsg('DataChannel kapandı.')
-    }
-    dc.onmessage = async (e) => {
-      try {
-        const plain = await decrypt(keyRef.current, e.data)
-        const msg = JSON.parse(new TextDecoder().decode(plain))
-        if (msg.type === 'PING') {
-          addMsg(`← PING: "${msg.text}"`, 'peer')
-          await sendEncrypted(dc, { type: 'PONG', text: msg.text })
-        } else if (msg.type === 'PONG') {
-          addMsg(`← PONG: "${msg.text}"`, 'peer')
-        } else if (msg.type?.startsWith('FILE_')) {
-          await fileHandlerRef.current?.(msg)
-        }
-      } catch {
-        addMsg(`← şifreli veri çözülemedi`, 'peer')
-      }
-    }
-
-    if (dc.readyState === 'open') {
-      setDcReady(true)
-      addMsg('✓ DataChannel açık — bağlantı hazır!')
-    }
-  }
-
-  useEffect(() => {
-    const key = secretKey.current
-
-    if (!key) {
-      setFatalErr('URL\'de şifreleme anahtarı yok (#key kısmı eksik). Linki tam kopyala.')
-      return
-    }
-
-    let destroyed = false
-
-    async function init() {
-      try {
-        keyRef.current = await deriveKey(key)
-        addMsg('✓ AES-GCM 256-bit anahtar türetildi.')
-      } catch {
-        setFatalErr('Geçersiz şifreleme anahtarı.')
-        return
-      }
-
-      const socket = connectSocket()
-      socketRef.current = socket
-
-      const peer = new PeerConnection({
-        onDataChannel: (dc) => setupDC(dc),
-        onConnectionChange: (state) => {
-          if (destroyed) return
-          setConnState(state)
-          addMsg(`⟳ Bağlantı: ${state}`)
-        },
-        onIceCandidate: (candidate) => {
-          socket.emit('ice_candidate', { roomId, candidate })
-        },
-      })
-      peerRef.current = peer
-
-      socket.on('connect', () => {
-        if (destroyed) return
-        addMsg(`✓ Sunucuya bağlandı. (${socket.id.slice(0, 8)}...)`)
-        socket.emit('create_room', { roomId })
-      })
-
-      socket.on('room_created', () => {
-        if (destroyed) return
-        roleRef.current = 'host'
-        setRole('host')
-        setConnState('waiting')
-        addMsg('✓ Oda oluşturuldu — HOST olarak bekleniyor...')
-        const dc = peer.createDataChannel('linkdrive')
-        setupDC(dc)
-      })
-
-      socket.on('peer_joined', async ({ peerCount }) => {
-        if (destroyed) return
-        addMsg(`✓ Peer katıldı (toplam: ${peerCount}).`)
-        if (roleRef.current === 'host' && peerCount === 2) {
-          setConnState('connecting')
-          const offer = await peer.createOffer()
-          socket.emit('offer', { roomId, offer })
-          addMsg('→ Offer gönderildi.')
-        }
-      })
-
-      socket.on('offer', async ({ offer }) => {
-        if (destroyed) return
-        roleRef.current = 'guest'
-        setRole('guest')
-        setConnState('connecting')
-        addMsg('← Offer alındı. Answer üretiliyor...')
-        const answer = await peer.handleOffer(offer)
-        socket.emit('answer', { roomId, answer })
-        addMsg('→ Answer gönderildi.')
-      })
-
-      socket.on('answer', async ({ answer }) => {
-        if (destroyed) return
-        addMsg('← Answer alındı.')
-        await peer.handleAnswer(answer)
-      })
-
-      socket.on('ice_candidate', async ({ candidate }) => {
-        if (destroyed) return
-        await peer.addIceCandidate(candidate)
-      })
-
-      socket.on('peer_left', () => {
-        if (destroyed) return
-        addMsg('⚠ Karşı taraf ayrıldı.')
-        setConnState('disconnected')
-        setDcReady(false)
-      })
-
-      socket.on('error', ({ code }) => {
-        if (destroyed) return
-        if (code === 'ROOM_FULL') {
-          setFatalErr('Oda dolu. Maksimum 2 kişi.')
-          return
-        }
-        if (code === 'ROOM_NOT_FOUND') {
-          roleRef.current = 'guest'
-          setRole('guest')
-          addMsg('→ Odaya katılıyor (GUEST)...')
-          socket.emit('join_room', { roomId })
-        }
-      })
-
-      socket.on('connect_error', (err) => {
-        if (destroyed) return
-        setFatalErr(`Sunucuya bağlanılamadı: ${err.message}`)
-      })
-
-      socket.connect()
-    }
-
-    init()
-
-    return () => {
-      destroyed = true
-      peerRef.current?.close()
-      disconnectSocket()
-    }
-  }, []) // eslint-disable-line
+  const fileTransfer = useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessageHandler })
+  const clipboard    = useClipboard({ dcReady, sendEncrypted, registerMessageHandler })
 
   if (fatalErr) {
     return (
@@ -221,27 +47,13 @@ export default function Room() {
 
       <ConnectionStatus state={connState} dcReady={dcReady} />
 
-      {role === 'host' && (
-        <ShareLink roomId={roomId} secretKey={secretKey.current} />
-      )}
+      {role === 'host' && <ShareLink roomId={roomId} secretKey={secretKey} />}
 
-      <FileTransfer
-        dcReady={dcReady}
-        dcRef={dcRef}
-        send={(msg) => sendEncrypted(dcRef.current, msg)}
-        onRegisterHandler={(handler) => { fileHandlerRef.current = handler }}
-      />
+      <FileTransfer dcReady={dcReady} {...fileTransfer} />
 
-      <MessageTest
-        dcReady={dcReady}
-        messages={messages}
-        onSend={async (text) => {
-          if (dcRef.current?.readyState === 'open') {
-            await sendEncrypted(dcRef.current, { type: 'PING', text })
-            addMsg(`→ PING: "${text}"`, 'self')
-          }
-        }}
-      />
+      <ClipboardShare dcReady={dcReady} {...clipboard} />
+
+      <MessageTest dcReady={dcReady} messages={messages} onSend={sendPing} />
     </div>
   )
 }
