@@ -55,7 +55,8 @@ export function useRoom(roomId, secretKey) {
     dc.onmessage = async (e) => {
       try {
         const plain = await decrypt(keyRef.current, e.data)
-        const msg   = JSON.parse(new TextDecoder().decode(plain))
+
+        const msg = JSON.parse(new TextDecoder().decode(plain))
 
         if (msg.type === 'PING') {
           addMsg(`← PING: "${msg.text}"`, 'peer')

@@ -3,7 +3,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { bufToBase64, base64ToBuf } from '../core/crypto.js'
 import { generatePreview } from '../core/preview.js'
 
-const CHUNK_SIZE = 16 * 1024
+const CHUNK_SIZE = 64 * 1024
 const MAX_SIZE   = 50 * 1024 ** 3
 
 function savePending(id, info) {
