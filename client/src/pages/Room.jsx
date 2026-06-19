@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { useRoom } from '../hooks/useRoom.js'
 import { useFileTransfer } from '../hooks/useFileTransfer.js'
 import { useClipboard } from '../hooks/useClipboard.js'
+import { useTheme } from '../hooks/useTheme.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
 import MessageTest from '../components/MessageTest.jsx'
@@ -13,6 +14,7 @@ import ClipboardShare from '../components/ClipboardShare.jsx'
 export default function Room() {
   const { roomId } = useParams()
   const secretKey  = useRef(window.location.hash.slice(1)).current
+  const { dark, toggle } = useTheme()
 
   const {
     role, connState, dcReady, fatalErr,
@@ -38,11 +40,20 @@ export default function Room() {
     <div className="min-h-screen flex flex-col items-center px-4 py-8 gap-6 max-w-2xl mx-auto">
 
       <div className="w-full flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">
-          P2P <span className="text-emerald-400">LinkDrive</span>
-          {role && <span className="ml-2 text-sm font-normal text-gray-400">({role})</span>}
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+          P2P <span className="text-emerald-500 dark:text-emerald-400">LinkDrive</span>
+          {role && <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">({role})</span>}
         </h1>
-        <a href="/" className="text-gray-500 hover:text-gray-300 text-sm transition-colors">✕ Çık</a>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={toggle}
+            title={dark ? 'Açık mod' : 'Koyu mod'}
+            className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors text-base"
+          >
+            {dark ? '☀️' : '🌙'}
+          </button>
+          <a href="/" className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 text-sm transition-colors">✕ Çık</a>
+        </div>
       </div>
 
       <ConnectionStatus state={connState} dcReady={dcReady} />
