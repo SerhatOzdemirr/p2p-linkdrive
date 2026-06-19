@@ -289,8 +289,8 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
           await sendEncrypted({ type: 'FILE_CANCEL', id })
           break
         }
-        while (dc.bufferedAmount > 8 * CHUNK_SIZE) {
-          await new Promise(r => setTimeout(r, 10))
+        while (dc.bufferedAmount > 2 * CHUNK_SIZE) {
+          await new Promise(r => setTimeout(r, 20))
         }
         const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
         const buf   = await slice.arrayBuffer()

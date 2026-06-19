@@ -32,7 +32,7 @@ export function useRoom(roomId, secretKey) {
     if (!dc || dc.readyState !== 'open') return
     const encoded = new TextEncoder().encode(JSON.stringify(msg))
     const buf = await encrypt(keyRef.current, encoded)
-    dc.send(buf)
+    try { dc.send(buf) } catch { /* buffer full — caller'ın backpressure'ı yakalaması lazım */ }
   }, [])
 
   const sendPing = useCallback(async (text) => {
