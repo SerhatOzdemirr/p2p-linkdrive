@@ -30,11 +30,11 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   const [sendError, setSendError]       = useState('')
   const [sendSpeed, setSendSpeed]       = useState(0)
   const [sendEta, setSendEta]           = useState(0)
-  // Önizleme gönderildi, alıcının kararı bekleniyor
   const [waitingAccept, setWaitingAccept] = useState(null) // { id, name, previewUrl }
+  const [queuedFiles, setQueuedFiles]   = useState([])     // [{ uid, file }] — UI için
 
   // ── Alıcı state ─────────────────────────────────────────────────────────
-  const [pendingFiles, setPendingFiles] = useState([]) // FILE_META geldi, kullanıcı karar verecek
+  const [pendingFiles, setPendingFiles] = useState([])
   const [receivedFiles, setReceivedFiles] = useState([])
   const [incomingMeta, setIncomingMeta] = useState(null)
   const [recvProgress, setRecvProgress] = useState(0)
@@ -44,14 +44,16 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   // ── Ortak state ─────────────────────────────────────────────────────────
   const [dragOver, setDragOver]           = useState(false)
   const [resumeRequest, setResumeRequest] = useState(null)
-  const [sendError2, _]                   = [sendError, setSendError]
 
   // ── Ref'ler ─────────────────────────────────────────────────────────────
-  const incoming          = useRef({}) // aktif alım transfer'ları
-  const opfsNames         = useRef([])
-  const cancelRef         = useRef(false)
-  const acceptResolversRef = useRef({}) // id → resolve (gönderen taraf accept bekliyor)
-  const previewMapRef     = useRef({})  // id → previewUrl (alıcı taraf, FILE_END'de kullanılır)
+  const incoming           = useRef({})
+  const opfsNames          = useRef([])
+  const cancelRef          = useRef(false)
+  const acceptResolversRef = useRef({})
+  const previewMapRef      = useRef({})
+  const sendingRef         = useRef(false) // setSending'in sync yansıması
+  const sendQueueRef       = useRef([])    // [{ uid, file }]
+  const drainingRef        = useRef(false) // drainQueue tekrarlı çağrı koruması
 
   // Tamamlanmış OPFS dosyalarını unmount'ta temizle
   useEffect(() => {
@@ -83,7 +85,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   // ── Mesaj yöneticisi ────────────────────────────────────────────────────
   const handleMessage = useCallback(async (msg) => {
 
-    // Alıcı: dosya duyurusu, önizleme bekleniyor
     if (msg.type === 'FILE_META') {
       if (msg.size > MAX_SIZE) return
       setPendingFiles(prev => [...prev, {
@@ -93,7 +94,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       return
     }
 
-    // Alıcı: önizleme geldi
     if (msg.type === 'FILE_PREVIEW') {
       previewMapRef.current[msg.id] = msg.dataUrl
       setPendingFiles(prev => prev.map(f =>
@@ -102,28 +102,23 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       return
     }
 
-    // Alıcı: gönderen iptal etti (kullanıcı henüz kabul etmeden)
     if (msg.type === 'FILE_WITHDRAW') {
       setPendingFiles(prev => prev.filter(f => f.id !== msg.id))
       delete previewMapRef.current[msg.id]
       return
     }
 
-    // Gönderen: alıcı kabul etti
     if (msg.type === 'FILE_ACCEPT') {
       acceptResolversRef.current[msg.id]?.(true)
       delete acceptResolversRef.current[msg.id]
       return
     }
 
-    // Gönderen: alıcı reddetti
     if (msg.type === 'FILE_DECLINE') {
       acceptResolversRef.current[msg.id]?.(false)
       delete acceptResolversRef.current[msg.id]
       return
     }
-
-    // ── Chunk transfer (mevcut protokol) ───────────────────────────────
 
     if (msg.type === 'FILE_START') {
       if (msg.size > MAX_SIZE) return
@@ -228,7 +223,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
 
   }, []) // eslint-disable-line
 
-  // Tüm FILE_* tipleri için aynı handler
   useEffect(() => {
     const types = [
       'FILE_META', 'FILE_PREVIEW', 'FILE_WITHDRAW',
@@ -239,29 +233,26 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     types.forEach(t => registerMessageHandler(t, handleMessage))
   }, []) // eslint-disable-line
 
-  // ── Dosya gönder ────────────────────────────────────────────────────────
+  // ── Tekil dosya gönder ──────────────────────────────────────────────────
   async function sendFile(file, fromChunk = 0, resumeId = null) {
-    if (!dcReady || !dcRef.current || sending) return
-    const dc        = dcRef.current
-    const isResume  = fromChunk > 0 || resumeId !== null
-    const id        = resumeId || crypto.randomUUID()
+    if (!dcReady || !dcRef.current || sendingRef.current) return
+    const dc         = dcRef.current
+    const isResume   = fromChunk > 0 || resumeId !== null
+    const id         = resumeId || crypto.randomUUID()
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1
 
-    cancelRef.current = false
+    cancelRef.current  = false
+    sendingRef.current = true
     setSending(true)
     setSendingName(file.name)
     setSendError('')
 
     try {
       if (!isResume) {
-        // 1. Önizleme üret (hata olursa null döner, akış devam eder)
         const previewUrl = await generatePreview(file)
-
-        // 2. Meta + önizleme gönder
         await sendEncrypted({ type: 'FILE_META', id, name: file.name, size: file.size, mime: file.type, totalChunks })
         if (previewUrl) await sendEncrypted({ type: 'FILE_PREVIEW', id, dataUrl: previewUrl })
 
-        // 3. Alıcının kararını bekle
         setWaitingAccept({ id, name: file.name, previewUrl })
         const accepted = await new Promise(resolve => {
           acceptResolversRef.current[id] = resolve
@@ -274,7 +265,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
         }
       }
 
-      // 4. Chunk'ları gönder
       let bytesSent = fromChunk * CHUNK_SIZE
       const startTime = Date.now()
       setSendProgress((bytesSent / Math.max(file.size, 1)) * 100)
@@ -312,6 +302,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     } catch (err) {
       setSendError(err?.message || 'Dosya gönderilemedi.')
     } finally {
+      sendingRef.current = false
       setSending(false)
       setSendingName('')
       setSendSpeed(0)
@@ -320,6 +311,39 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       cancelRef.current = false
       delete acceptResolversRef.current[id]
     }
+  }
+
+  // ── Kuyruk işlemcisi ────────────────────────────────────────────────────
+  async function drainQueue() {
+    if (drainingRef.current) return
+    drainingRef.current = true
+
+    while (sendQueueRef.current.length > 0) {
+      const entry = sendQueueRef.current.shift()
+      setQueuedFiles([...sendQueueRef.current])
+      cancelRef.current = false
+      await sendFile(entry.file)
+      if (cancelRef.current) {
+        // İptal sonrası kuyruğu temizle
+        sendQueueRef.current = []
+        setQueuedFiles([])
+        break
+      }
+    }
+
+    drainingRef.current = false
+  }
+
+  function enqueueFiles(files) {
+    const entries = files.map(f => ({ uid: crypto.randomUUID(), file: f }))
+    sendQueueRef.current.push(...entries)
+    setQueuedFiles(prev => [...prev, ...entries])
+    drainQueue()
+  }
+
+  function removeFromQueue(uid) {
+    sendQueueRef.current = sendQueueRef.current.filter(e => e.uid !== uid)
+    setQueuedFiles(prev => prev.filter(e => e.uid !== uid))
   }
 
   // ── Alıcı: kabul / reddet ───────────────────────────────────────────────
@@ -356,26 +380,29 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     e.preventDefault()
     setDragOver(false)
     setSendError('')
-    const entry = e.dataTransfer.items?.[0]?.webkitGetAsEntry?.()
-    if (entry?.isDirectory) {
+    const items = [...(e.dataTransfer.items || [])]
+    const hasDir = items.some(item => item.webkitGetAsEntry?.()?.isDirectory)
+    if (hasDir) {
       setSendError('Klasör gönderilemez — önce ZIP\'leyin.')
       return
     }
-    const file = e.dataTransfer.files[0]
-    if (file) sendFile(file)
+    const files = [...e.dataTransfer.files]
+    if (files.length) enqueueFiles(files)
   }
 
   function handleInput(e) {
-    const file = e.target.files[0]
-    if (file) sendFile(file)
+    const files = [...e.target.files]
+    if (files.length) enqueueFiles(files)
     e.target.value = ''
   }
 
   function cancelTransfer() {
     cancelRef.current = true
-    // Accept bekliyorsa da iptal et
     Object.values(acceptResolversRef.current).forEach(r => r(false))
     acceptResolversRef.current = {}
+    // Kuyruğu da temizle
+    sendQueueRef.current = []
+    setQueuedFiles([])
   }
 
   function dismissResume() {
@@ -386,7 +413,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   return {
     // Gönderen
     sending, sendProgress, sendingName, sendError, sendSpeed, sendEta,
-    waitingAccept,
+    waitingAccept, queuedFiles,
     // Alıcı
     pendingFiles, receivedFiles,
     incomingMeta, recvProgress, recvSpeed, recvEta,
@@ -397,6 +424,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     handleDrop, handleInput, handleResumeFile,
     cancelTransfer, dismissResume,
     acceptFile, declineFile,
+    removeFromQueue,
     setSendError,
   }
 }

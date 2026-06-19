@@ -38,14 +38,14 @@ function PreviewThumb({ previewUrl, mime, size = 'md' }) {
 export default function FileTransfer({
   dcReady,
   sending, sendProgress, sendingName, sendError, sendSpeed, sendEta,
-  waitingAccept,
+  waitingAccept, queuedFiles,
   pendingFiles, receivedFiles,
   incomingMeta, recvProgress, recvSpeed, recvEta,
   dragOver, setDragOver,
   resumeRequest,
   handleDrop, handleInput, handleResumeFile,
   cancelTransfer, dismissResume,
-  acceptFile, declineFile,
+  acceptFile, declineFile, removeFromQueue,
 }) {
   const off = !dcReady || sending || !!waitingAccept
 
@@ -86,7 +86,7 @@ export default function FileTransfer({
             : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer'
           }`}
       >
-        <input type="file" className="hidden" onChange={handleInput} disabled={off} />
+        <input type="file" multiple className="hidden" onChange={handleInput} disabled={off} />
         {sending ? (
           <span className="text-gray-500 dark:text-gray-400 text-sm">Gönderiliyor...</span>
         ) : waitingAccept ? (
@@ -136,6 +136,27 @@ export default function FileTransfer({
             <span className="text-xs text-gray-400 dark:text-gray-500">{sendProgress.toFixed(1)}%</span>
             <button onClick={cancelTransfer} className="text-xs text-red-500 dark:text-red-400 hover:text-red-400 dark:hover:text-red-300 transition-colors">İptal</button>
           </div>
+        </div>
+      )}
+
+      {/* Gönderme kuyruğu */}
+      {queuedFiles.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+            Sırada ({queuedFiles.length})
+          </p>
+          {queuedFiles.map(({ uid, file }) => (
+            <div key={uid} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-xl px-3 py-2">
+              <span className="text-sm text-gray-900 dark:text-white truncate flex-1">{file.name}</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{fmtBytes(file.size)}</span>
+              <button
+                onClick={() => removeFromQueue(uid)}
+                className="shrink-0 text-gray-400 hover:text-red-400 dark:hover:text-red-400 transition-colors text-xs leading-none"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
