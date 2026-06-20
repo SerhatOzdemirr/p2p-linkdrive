@@ -1,20 +1,30 @@
 // pages/Room.jsx
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useRoom } from '../hooks/useRoom.js'
 import { useFileTransfer } from '../hooks/useFileTransfer.js'
 import { useClipboard } from '../hooks/useClipboard.js'
 import { useTheme } from '../hooks/useTheme.js'
+import { useCanvas } from '../hooks/useCanvas.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
 import MessageTest from '../components/MessageTest.jsx'
 import FileTransfer from '../components/FileTransfer.jsx'
 import ClipboardShare from '../components/ClipboardShare.jsx'
+import Canvas from '../components/Canvas.jsx'
+
+const TABS = [
+  { id: 'files',   label: 'Dosyalar' },
+  { id: 'canvas',  label: 'Tahta'    },
+  { id: 'text',    label: 'Metin'    },
+  { id: 'test',    label: 'Test'     },
+]
 
 export default function Room() {
-  const { roomId } = useParams()
-  const secretKey  = useRef(window.location.hash.slice(1)).current
-  const { dark, toggle } = useTheme()
+  const { roomId }        = useParams()
+  const secretKey         = useRef(window.location.hash.slice(1)).current
+  const { dark, toggle }  = useTheme()
+  const [activeTab, setActiveTab] = useState('files')
 
   const {
     role, connState, dcReady, fatalErr,
@@ -23,6 +33,10 @@ export default function Room() {
 
   const fileTransfer = useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessageHandler })
   const clipboard    = useClipboard({ dcReady, sendEncrypted, registerMessageHandler })
+  const canvas       = useCanvas({ dcReady, sendEncrypted, registerMessageHandler })
+
+  // Dosyalar tab'ı badge'i: bekleyen onay veya aktif alım varsa
+  const filesBadge = fileTransfer.pendingFiles.length > 0 || !!fileTransfer.incomingMeta
 
   if (fatalErr) {
     return (
@@ -37,8 +51,9 @@ export default function Room() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center px-4 py-8 gap-6 max-w-2xl mx-auto">
+    <div className="min-h-screen flex flex-col items-center px-4 py-6 gap-4 max-w-2xl mx-auto">
 
+      {/* Header */}
       <div className="w-full flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900 dark:text-white">
           P2P <span className="text-emerald-500 dark:text-emerald-400">LinkDrive</span>
@@ -56,15 +71,51 @@ export default function Room() {
         </div>
       </div>
 
+      {/* Bağlantı durumu — her zaman görünür */}
       <ConnectionStatus state={connState} dcReady={dcReady} />
 
+      {/* Link paylaşımı — sadece host, her zaman görünür */}
       {role === 'host' && <ShareLink roomId={roomId} secretKey={secretKey} />}
 
-      <FileTransfer dcReady={dcReady} {...fileTransfer} />
+      {/* Tab çubuğu */}
+      <div className="w-full flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-2xl p-1">
+        {TABS.map(tab => {
+          const hasBadge = tab.id === 'files' && filesBadge && activeTab !== 'files'
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`relative flex-1 py-2 text-sm font-semibold rounded-xl transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }`}
+            >
+              {tab.label}
+              {hasBadge && (
+                <span className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />
+              )}
+            </button>
+          )
+        })}
+      </div>
 
-      <ClipboardShare dcReady={dcReady} {...clipboard} />
+      {/* Tab içerikleri — grid stacking: hepsi aynı hücrede, boyut en büyüğe (Tahta) göre sabit kalır */}
+      <div className="w-full grid">
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'files'  ? '' : 'invisible pointer-events-none'}>
+          <FileTransfer dcReady={dcReady} {...fileTransfer} />
+        </div>
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'canvas' ? '' : 'invisible pointer-events-none'}>
+          <Canvas dcReady={dcReady} {...canvas} />
+        </div>
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'text'   ? '' : 'invisible pointer-events-none'}>
+          <ClipboardShare dcReady={dcReady} {...clipboard} />
+        </div>
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'test'   ? '' : 'invisible pointer-events-none'}>
+          <MessageTest dcReady={dcReady} messages={messages} onSend={sendPing} />
+        </div>
+      </div>
 
-      <MessageTest dcReady={dcReady} messages={messages} onSend={sendPing} />
     </div>
   )
 }

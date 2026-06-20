@@ -200,12 +200,28 @@ export default function FileTransfer({
         <div className="flex flex-col gap-1.5">
           <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
             <span className="truncate max-w-[55%]">↓ {incomingMeta.name}</span>
-            <span className="shrink-0 text-right">{fmtBytes(recvSpeed)}/s{recvEta > 0 && ` — ${fmtEta(recvEta)} kaldı`}</span>
+            <span className="shrink-0 text-right">
+              {recvSpeed > 0
+                ? `${fmtBytes(recvSpeed)}/s${recvEta > 0 ? ` — ${fmtEta(recvEta)} kaldı` : ''}`
+                : 'Başlatılıyor…'}
+            </span>
           </div>
           <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 transition-all duration-75" style={{ width: `${recvProgress}%` }} />
+            {recvProgress > 0
+              ? <div className="h-full bg-blue-500 transition-all duration-75" style={{ width: `${recvProgress}%` }} />
+              : <div className="h-full w-1/3 bg-blue-400 animate-pulse rounded-full" />
+            }
           </div>
-          <span className="text-xs text-gray-400 dark:text-gray-500">{recvProgress.toFixed(1)}%</span>
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              {recvProgress > 0 ? `${recvProgress.toFixed(1)}%` : `${fmtBytes(incomingMeta.size)}`}
+            </span>
+            {recvSpeed > 0 && recvProgress > 0 && (
+              <span className="text-xs text-blue-500 dark:text-blue-400 font-medium">
+                {fmtBytes(incomingMeta.size * recvProgress / 100)} / {fmtBytes(incomingMeta.size)}
+              </span>
+            )}
+          </div>
         </div>
       )}
 

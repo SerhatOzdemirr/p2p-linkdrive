@@ -3,8 +3,12 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { bufToBase64, base64ToBuf } from '../core/crypto.js'
 import { generatePreview } from '../core/preview.js'
 
-const CHUNK_SIZE = 64 * 1024
-const MAX_SIZE   = 50 * 1024 ** 3
+// 128 KB: base64 sonrası ~171 KB → Chrome DataChannel 256 KB limitinin altında
+// 256 KB denenmiş, encrypted mesaj ~342 KB çıkıyor → dc.send() patlar, chunk kaybolur
+const CHUNK_SIZE     = 128 * 1024
+const HIGH_WATERMARK = 8 * CHUNK_SIZE    // 1 MB — bu dolunca dur
+const LOW_WATERMARK  = CHUNK_SIZE        // 128 KB — buna düşünce devam et
+const MAX_SIZE       = 50 * 1024 ** 3
 
 function savePending(id, info) {
   try {
@@ -168,6 +172,8 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     else if (msg.type === 'FILE_CHUNK') {
       const t = incoming.current[msg.id]
       if (!t) return
+      // İlk chunk gelince süreyi başlat (FILE_START → ilk chunk arası gecikmeyi dışarıda bırak)
+      if (t.received === 0) t.startTime = Date.now()
       const buf = base64ToBuf(msg.data)
       if (t.mode === 'opfs') {
         await t.writable.write(buf)
@@ -271,6 +277,9 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       setSendSpeed(0)
       setSendEta(0)
 
+      // Event-driven backpressure için threshold'u bir kez ayarla
+      dc.bufferedAmountLowThreshold = LOW_WATERMARK
+
       const msgType = fromChunk > 0 ? 'FILE_RESUME_START' : 'FILE_START'
       await sendEncrypted({ type: msgType, id, name: file.name, size: file.size, totalChunks, mime: file.type, fromChunk })
 
@@ -279,8 +288,13 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
           await sendEncrypted({ type: 'FILE_CANCEL', id })
           break
         }
-        while (dc.bufferedAmount > 2 * CHUNK_SIZE) {
-          await new Promise(r => setTimeout(r, 20))
+        // Buffer doluysa event gelene kadar bekle (polling yok, sleep yok)
+        if (dc.bufferedAmount > HIGH_WATERMARK) {
+          await new Promise(resolve => {
+            dc.addEventListener('bufferedamountlow', resolve, { once: true })
+            // Race condition: threshold'a zaten düşmüşse hemen devam et
+            if (dc.bufferedAmount <= LOW_WATERMARK) resolve()
+          })
         }
         const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
         const buf   = await slice.arrayBuffer()
