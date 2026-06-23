@@ -149,7 +149,7 @@ function PreviewThumb({ previewUrl, mime, name, size = 'md' }) {
 export default function FileTransfer({
   dcReady,
   sending, sendProgress, sendingName, sendError, sendSpeed, sendEta,
-  waitingAccept, queuedFiles,
+  waitingAccept, queuedFiles, batchTotal, batchDone,
   pendingFiles, receivedFiles,
   incomingMeta, recvProgress, recvSpeed, recvEta,
   dragOver, setDragOver,
@@ -233,6 +233,27 @@ export default function FileTransfer({
           </button>
         </div>
       )}
+
+      {/* Toplu gönderim genel ilerleme */}
+      {batchTotal > 1 && (() => {
+        const overall = Math.min(((batchDone + (sending ? sendProgress / 100 : 0)) / batchTotal) * 100, 100)
+        const allDone = batchDone >= batchTotal
+        return (
+          <div className="flex flex-col gap-1.5 bg-gray-100 dark:bg-gray-800 rounded-xl p-3">
+            <div className="flex justify-between items-center text-xs">
+              <span className="font-semibold text-gray-700 dark:text-gray-200">
+                {allDone ? '✓ Tümü gönderildi' : `Toplu gönderim — ${batchDone + 1}/${batchTotal}. dosya`}
+              </span>
+              <span className="text-gray-500 dark:text-gray-400">
+                %{overall.toFixed(0)} · {batchTotal - batchDone} kaldı
+              </span>
+            </div>
+            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className="h-full bg-emerald-500 transition-all duration-150 rounded-full" style={{ width: `${overall}%` }} />
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Gönderim ilerlemesi */}
       {sending && (

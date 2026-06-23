@@ -36,6 +36,8 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   const [sendEta, setSendEta]           = useState(0)
   const [waitingAccept, setWaitingAccept] = useState(null) // { id, name, previewUrl }
   const [queuedFiles, setQueuedFiles]   = useState([])     // [{ uid, file }] — UI için
+  const [batchTotal, setBatchTotal]     = useState(0)      // toplu gönderim: toplam dosya
+  const [batchDone, setBatchDone]       = useState(0)      // toplu gönderim: biten dosya
 
   // ── Alıcı state ─────────────────────────────────────────────────────────
   const [pendingFiles, setPendingFiles] = useState([])
@@ -60,6 +62,8 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   const sendQueueRef       = useRef([])    // [{ uid, file }]
   const drainingRef        = useRef(false) // drainQueue tekrarlı çağrı koruması
   const autoAcceptRef      = useRef(false) // autoAccept'in sync yansıması
+  const batchTotalRef      = useRef(0)     // batchTotal'ın sync yansıması
+  const batchDoneRef       = useRef(0)     // batchDone'ın sync yansıması
 
   // Tamamlanmış OPFS dosyalarını unmount'ta temizle
   useEffect(() => {
@@ -346,18 +350,44 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       cancelRef.current = false
       await sendFile(entry.file)
       if (cancelRef.current) {
-        // İptal sonrası kuyruğu temizle
+        // İptal sonrası kuyruğu ve batch sayaçlarını temizle
         sendQueueRef.current = []
         setQueuedFiles([])
+        batchTotalRef.current = 0
+        batchDoneRef.current  = 0
+        setBatchTotal(0)
+        setBatchDone(0)
         break
       }
+      // Dosya tamamlandı (gönderildi/reddedildi) → batch sayacını artır
+      batchDoneRef.current++
+      setBatchDone(batchDoneRef.current)
     }
 
     drainingRef.current = false
+    // Batch bitti — bir süre sonra göstergeyi sıfırla
+    if (!cancelRef.current) {
+      setTimeout(() => {
+        if (!drainingRef.current) {
+          batchTotalRef.current = 0
+          batchDoneRef.current  = 0
+          setBatchTotal(0)
+          setBatchDone(0)
+        }
+      }, 1500)
+    }
   }
 
   function enqueueFiles(files) {
     const entries = files.map(f => ({ uid: crypto.randomUUID(), file: f }))
+    // Yeni batch başlıyorsa sayaçları sıfırla
+    if (!drainingRef.current) {
+      batchTotalRef.current = 0
+      batchDoneRef.current  = 0
+      setBatchDone(0)
+    }
+    batchTotalRef.current += entries.length
+    setBatchTotal(batchTotalRef.current)
     sendQueueRef.current.push(...entries)
     setQueuedFiles(prev => [...prev, ...entries])
     drainQueue()
@@ -439,9 +469,13 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     cancelRef.current = true
     Object.values(acceptResolversRef.current).forEach(r => r(false))
     acceptResolversRef.current = {}
-    // Kuyruğu da temizle
+    // Kuyruğu ve batch sayaçlarını temizle
     sendQueueRef.current = []
     setQueuedFiles([])
+    batchTotalRef.current = 0
+    batchDoneRef.current  = 0
+    setBatchTotal(0)
+    setBatchDone(0)
   }
 
   function dismissResume() {
@@ -452,7 +486,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   return {
     // Gönderen
     sending, sendProgress, sendingName, sendError, sendSpeed, sendEta,
-    waitingAccept, queuedFiles,
+    waitingAccept, queuedFiles, batchTotal, batchDone,
     // Alıcı
     pendingFiles, receivedFiles,
     incomingMeta, recvProgress, recvSpeed, recvEta,
