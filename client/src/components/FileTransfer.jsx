@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { isEditable } from '../hooks/useDocEditor.js'
 import { isHeicName, convertAndDownload } from '../core/heic.js'
+import { zipAndDownload } from '../core/zip.js'
 function fmtBytes(bytes) {
   if (bytes < 1024)      return `${bytes} B`
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
@@ -128,6 +129,72 @@ function ReceivedFileCell({ f }) {
           </a>
         )}
       </div>
+    </div>
+  )
+}
+
+// Alınan dosyalar bölümü — ZIP indirme + grid/liste
+function ReceivedFilesSection({ receivedFiles, onEditFile }) {
+  const [zipping, setZipping] = useState(null) // { label, text } | null
+
+  const hasHeic  = receivedFiles.some(f => isHeicName(f.name))
+  const gridMode = receivedFiles.length > 4
+
+  async function downloadZip(convertHeicToJpg, label) {
+    if (zipping) return
+    setZipping({ label, text: 'Hazırlanıyor…' })
+    try {
+      await zipAndDownload(receivedFiles, {
+        convertHeicToJpg,
+        onProgress: (p) => {
+          if (p.phase === 'add') setZipping({ label, text: `Ekleniyor ${p.index}/${p.total}` })
+          else setZipping({ label, text: `Sıkıştırılıyor %${Math.round(p.percent)}` })
+        },
+      })
+    } catch { /* iptal/hata */ }
+    finally { setZipping(null) }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+          Alınan Dosyalar ({receivedFiles.length})
+        </p>
+        {receivedFiles.length > 1 && (
+          <div className="flex gap-1.5 flex-wrap items-center">
+            {zipping && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">{zipping.text}</span>
+            )}
+            {hasHeic && (
+              <button
+                onClick={() => downloadZip(true, 'jpgzip')}
+                disabled={!!zipping}
+                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+              >
+                {zipping?.label === 'jpgzip' ? '…' : 'ZIP (JPG)'}
+              </button>
+            )}
+            <button
+              onClick={() => downloadZip(false, 'zip')}
+              disabled={!!zipping}
+              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              {zipping?.label === 'zip' ? '…' : 'ZIP indir ↓'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {gridMode ? (
+        <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+          {receivedFiles.map((f, i) => <ReceivedFileCell key={i} f={f} />)}
+        </div>
+      ) : (
+        receivedFiles.map((f, i) => (
+          <ReceivedFileRow key={i} f={f} onEditFile={onEditFile} />
+        ))
+      )}
     </div>
   )
 }
@@ -388,68 +455,9 @@ export default function FileTransfer({
       )}
 
       {/* Alınan dosyalar */}
-      {receivedFiles.length > 0 && (() => {
-        const hasHeic   = receivedFiles.some(f => isHeicName(f.name))
-        const gridMode  = receivedFiles.length > 4   // çok dosya → isimsiz grid
-
-        const downloadAll = () => {
-          receivedFiles.forEach((f, i) => {
-            setTimeout(() => {
-              const a = document.createElement('a')
-              a.href = f.url
-              a.download = f.name
-              a.click()
-            }, i * 200)
-          })
-        }
-        const convertAll = async (toType) => {
-          for (const f of receivedFiles) {
-            if (isHeicName(f.name)) {
-              try { await convertAndDownload(f.url, f.name, toType) } catch {}
-            }
-          }
-        }
-
-        return (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                Alınan Dosyalar ({receivedFiles.length})
-              </p>
-              <div className="flex gap-1.5 flex-wrap">
-                {hasHeic && (
-                  <>
-                    <button onClick={() => convertAll('image/jpeg')}
-                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors">
-                      Tümünü JPG
-                    </button>
-                    <button onClick={() => convertAll('image/png')}
-                      className="px-2.5 py-1 bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold rounded-lg transition-colors">
-                      Tümünü PNG
-                    </button>
-                  </>
-                )}
-                {receivedFiles.length > 1 && (
-                  <button onClick={downloadAll}
-                    className="px-2.5 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors">
-                    {hasHeic ? 'Tümünü HEIC' : 'Tümünü İndir ↓'}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {gridMode ? (
-              <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                {receivedFiles.map((f, i) => <ReceivedFileCell key={i} f={f} />)}
-              </div>
-            ) : (
-              receivedFiles.map((f, i) => (
-                <ReceivedFileRow key={i} f={f} onEditFile={onEditFile} />
-              ))
-            )}
-          </div>
-        )
-      })()}
+      {receivedFiles.length > 0 && (
+        <ReceivedFilesSection receivedFiles={receivedFiles} onEditFile={onEditFile} />
+      )}
     </div>
   )
 }
