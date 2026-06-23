@@ -1,8 +1,12 @@
 // core/preview.js — gönderen tarafta önizleme üretir, DataChannel'dan karşıya gönderilir
+import { isHeic, heicToBlob } from './heic.js'
+
 const THUMB = 260 // maksimum thumbnail boyutu (px)
 
 async function imageThumb(file) {
-  const bitmap = await createImageBitmap(file)
+  // HEIC/HEIF native açılmaz — önce JPEG'e çevir
+  const src    = isHeic(file) ? await heicToBlob(file, 'image/jpeg', 0.85) : file
+  const bitmap = await createImageBitmap(src)
   const scale  = Math.min(THUMB / bitmap.width, THUMB / bitmap.height, 1)
   const w = Math.round(bitmap.width  * scale)
   const h = Math.round(bitmap.height * scale)
@@ -70,9 +74,10 @@ async function pdfFirstPage(file) {
 
 export async function generatePreview(file) {
   try {
-    if (file.type.startsWith('image/')) return await imageThumb(file)
-    if (file.type.startsWith('video/')) return await videoFirstFrame(file)
-    if (file.type === 'application/pdf')  return await pdfFirstPage(file)
+    if (isHeic(file))                    return await imageThumb(file)
+    if (file.type.startsWith('image/'))  return await imageThumb(file)
+    if (file.type.startsWith('video/'))  return await videoFirstFrame(file)
+    if (file.type === 'application/pdf') return await pdfFirstPage(file)
     return null
   } catch {
     return null

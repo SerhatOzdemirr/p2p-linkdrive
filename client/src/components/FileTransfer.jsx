@@ -1,5 +1,7 @@
 // components/FileTransfer.jsx — pure UI
+import { useState } from 'react'
 import { isEditable } from '../hooks/useDocEditor.js'
+import { isHeicName, convertAndDownload } from '../core/heic.js'
 function fmtBytes(bytes) {
   if (bytes < 1024)      return `${bytes} B`
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
@@ -14,7 +16,9 @@ function fmtEta(sec) {
   return m > 0 ? `${m}dk ${s}sn` : `${s}sn`
 }
 
-function FileIcon({ mime }) {
+function FileIcon({ mime, name }) {
+  if (isHeicName(name))                                    return <span className="text-3xl">📷</span>
+  if (mime?.startsWith('image/'))                          return <span className="text-3xl">🖼️</span>
   if (mime?.startsWith('video/'))                          return <span className="text-3xl">🎬</span>
   if (mime === 'application/pdf')                          return <span className="text-3xl">📄</span>
   if (mime?.startsWith('audio/'))                          return <span className="text-3xl">🎵</span>
@@ -22,7 +26,113 @@ function FileIcon({ mime }) {
   return <span className="text-3xl">📎</span>
 }
 
-function PreviewThumb({ previewUrl, mime, size = 'md' }) {
+// Alınan tek dosya satırı — HEIC için JPG/PNG çevir-indir
+function ReceivedFileRow({ f, onEditFile }) {
+  const [converting, setConverting] = useState(null) // 'jpg' | 'png' | null
+  const heic = isHeicName(f.name)
+
+  async function convert(toType, label) {
+    setConverting(label)
+    try { await convertAndDownload(f.url, f.name, toType) }
+    catch { /* dönüştürme başarısız */ }
+    finally { setConverting(null) }
+  }
+
+  return (
+    <div className="flex items-center gap-3 bg-gray-100 dark:bg-gray-800 rounded-xl px-3 py-2.5">
+      <PreviewThumb previewUrl={f.previewUrl} mime={f.mime} name={f.name} size="sm" />
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="text-sm text-gray-900 dark:text-white truncate">{f.name}</span>
+        <span className="text-xs text-gray-500">{fmtBytes(f.size)}</span>
+      </div>
+      <div className="flex gap-1.5 shrink-0">
+        {heic ? (
+          <>
+            <button
+              onClick={() => convert('image/jpeg', 'jpg')}
+              disabled={!!converting}
+              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              {converting === 'jpg' ? '…' : 'JPG'}
+            </button>
+            <button
+              onClick={() => convert('image/png', 'png')}
+              disabled={!!converting}
+              className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              {converting === 'png' ? '…' : 'PNG'}
+            </button>
+            <a href={f.url} download={f.name} className="px-2.5 py-1.5 bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors">
+              HEIC
+            </a>
+          </>
+        ) : (
+          <>
+            {isEditable(f.name, f.size) && (
+              <button
+                onClick={() => onEditFile(f.name, f.url)}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors"
+              >
+                Düzenle
+              </button>
+            )}
+            <a href={f.url} download={f.name} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors">
+              İndir
+            </a>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Kompakt grid hücresi — çok dosya olunca isim gizli, yan yana
+function ReceivedFileCell({ f }) {
+  const [converting, setConverting] = useState(null)
+  const heic = isHeicName(f.name)
+
+  async function convert(toType, label) {
+    setConverting(label)
+    try { await convertAndDownload(f.url, f.name, toType) }
+    catch {}
+    finally { setConverting(null) }
+  }
+
+  return (
+    <div className="group relative aspect-square rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-950 border border-gray-200 dark:border-gray-800" title={f.name}>
+      {f.previewUrl
+        ? <img src={f.previewUrl} alt={f.name} className="w-full h-full object-cover" />
+        : <div className="w-full h-full flex items-center justify-center"><FileIcon mime={f.mime} name={f.name} /></div>
+      }
+      {/* Hover overlay — indirme butonları */}
+      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
+        {heic ? (
+          <>
+            <button onClick={() => convert('image/jpeg', 'jpg')} disabled={!!converting}
+              className="w-full py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[10px] font-bold rounded">
+              {converting === 'jpg' ? '…' : 'JPG'}
+            </button>
+            <button onClick={() => convert('image/png', 'png')} disabled={!!converting}
+              className="w-full py-1 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-[10px] font-bold rounded">
+              {converting === 'png' ? '…' : 'PNG'}
+            </button>
+            <a href={f.url} download={f.name}
+              className="w-full py-1 bg-gray-400 hover:bg-gray-300 text-gray-900 text-[10px] font-bold rounded text-center">
+              HEIC
+            </a>
+          </>
+        ) : (
+          <a href={f.url} download={f.name}
+            className="w-full py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold rounded text-center">
+            İndir
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PreviewThumb({ previewUrl, mime, name, size = 'md' }) {
   const dim = size === 'sm' ? 'w-16 h-16' : 'w-full max-h-52'
   if (previewUrl) {
     return (
@@ -31,7 +141,7 @@ function PreviewThumb({ previewUrl, mime, size = 'md' }) {
   }
   return (
     <div className={`${dim} flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-950`}>
-      <FileIcon mime={mime} />
+      <FileIcon mime={mime} name={name} />
     </div>
   )
 }
@@ -257,54 +367,68 @@ export default function FileTransfer({
       )}
 
       {/* Alınan dosyalar */}
-      {receivedFiles.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-              Alınan Dosyalar ({receivedFiles.length})
-            </p>
-            {receivedFiles.length > 1 && (
-              <button
-                onClick={() => {
-                  receivedFiles.forEach((f, i) => {
-                    setTimeout(() => {
-                      const a = document.createElement('a')
-                      a.href = f.url
-                      a.download = f.name
-                      a.click()
-                    }, i * 200)
-                  })
-                }}
-                className="px-3 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors"
-              >
-                Tümünü İndir ↓
-              </button>
-            )}
-          </div>
-          {receivedFiles.map((f, i) => (
-            <div key={i} className="flex items-center gap-3 bg-gray-100 dark:bg-gray-800 rounded-xl px-3 py-2.5">
-              <PreviewThumb previewUrl={f.previewUrl} mime={f.mime} size="sm" />
-              <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-sm text-gray-900 dark:text-white truncate">{f.name}</span>
-                <span className="text-xs text-gray-500">{fmtBytes(f.size)}</span>
-              </div>
-              <div className="flex gap-1.5 shrink-0">
-                {isEditable(f.name, f.size) && (
-                  <button
-                    onClick={() => onEditFile(f.name, f.url)}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors"
-                  >
-                    Düzenle
+      {receivedFiles.length > 0 && (() => {
+        const hasHeic   = receivedFiles.some(f => isHeicName(f.name))
+        const gridMode  = receivedFiles.length > 4   // çok dosya → isimsiz grid
+
+        const downloadAll = () => {
+          receivedFiles.forEach((f, i) => {
+            setTimeout(() => {
+              const a = document.createElement('a')
+              a.href = f.url
+              a.download = f.name
+              a.click()
+            }, i * 200)
+          })
+        }
+        const convertAll = async (toType) => {
+          for (const f of receivedFiles) {
+            if (isHeicName(f.name)) {
+              try { await convertAndDownload(f.url, f.name, toType) } catch {}
+            }
+          }
+        }
+
+        return (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                Alınan Dosyalar ({receivedFiles.length})
+              </p>
+              <div className="flex gap-1.5 flex-wrap">
+                {hasHeic && (
+                  <>
+                    <button onClick={() => convertAll('image/jpeg')}
+                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors">
+                      Tümünü JPG
+                    </button>
+                    <button onClick={() => convertAll('image/png')}
+                      className="px-2.5 py-1 bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold rounded-lg transition-colors">
+                      Tümünü PNG
+                    </button>
+                  </>
+                )}
+                {receivedFiles.length > 1 && (
+                  <button onClick={downloadAll}
+                    className="px-2.5 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors">
+                    {hasHeic ? 'Tümünü HEIC' : 'Tümünü İndir ↓'}
                   </button>
                 )}
-                <a href={f.url} download={f.name} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors">
-                  İndir
-                </a>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+
+            {gridMode ? (
+              <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                {receivedFiles.map((f, i) => <ReceivedFileCell key={i} f={f} />)}
+              </div>
+            ) : (
+              receivedFiles.map((f, i) => (
+                <ReceivedFileRow key={i} f={f} onEditFile={onEditFile} />
+              ))
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }

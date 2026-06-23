@@ -215,7 +215,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       const previewUrl = previewMapRef.current[msg.id] ?? null
       delete previewMapRef.current[msg.id]
       removePending(msg.id)
-      setReceivedFiles(prev => [...prev, { name: t.meta.name, size: t.meta.size, url, previewUrl }])
+      setReceivedFiles(prev => [...prev, { name: t.meta.name, size: t.meta.size, mime: t.meta.mime, url, previewUrl }])
       setIncomingMeta(null)
       setRecvProgress(0)
       setRecvSpeed(0)
