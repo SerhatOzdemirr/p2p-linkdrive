@@ -1,4 +1,5 @@
 // components/FileTransfer.jsx — pure UI
+import { isEditable } from '../hooks/useDocEditor.js'
 function fmtBytes(bytes) {
   if (bytes < 1024)      return `${bytes} B`
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
@@ -45,7 +46,8 @@ export default function FileTransfer({
   resumeRequest,
   handleDrop, handleInput, handleResumeFile,
   cancelTransfer, dismissResume,
-  acceptFile, declineFile, removeFromQueue,
+  acceptFile, declineFile, acceptAll, autoAccept, disableAutoAccept, removeFromQueue,
+  onEditFile,
 }) {
   const off = !dcReady || sending || !!waitingAccept
 
@@ -160,10 +162,38 @@ export default function FileTransfer({
         </div>
       )}
 
+      {/* Auto-accept aktif göstergesi */}
+      {autoAccept && (
+        <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-800 rounded-xl px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+            <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+              Otomatik kabul açık — gelen dosyalar sırayla indiriliyor
+            </span>
+          </div>
+          <button
+            onClick={disableAutoAccept}
+            className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 transition-colors"
+          >
+            Kapat
+          </button>
+        </div>
+      )}
+
       {/* Alıcı: gelen dosyalar (onay bekliyor) */}
       {pendingFiles.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">Gelen Dosya</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">Gelen Dosya</p>
+            {pendingFiles.length >= 1 && (
+              <button
+                onClick={acceptAll}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors"
+              >
+                Tümünü Kabul Et ↓
+              </button>
+            )}
+          </div>
           {pendingFiles.map(f => (
             <div key={f.id} className="bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden">
               <div className="w-full bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-2 min-h-[80px]">
@@ -194,6 +224,7 @@ export default function FileTransfer({
           ))}
         </div>
       )}
+      {/* /pending files */}
 
       {/* Alım ilerlemesi */}
       {incomingMeta && (
@@ -228,7 +259,28 @@ export default function FileTransfer({
       {/* Alınan dosyalar */}
       {receivedFiles.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">Alınan Dosyalar</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+              Alınan Dosyalar ({receivedFiles.length})
+            </p>
+            {receivedFiles.length > 1 && (
+              <button
+                onClick={() => {
+                  receivedFiles.forEach((f, i) => {
+                    setTimeout(() => {
+                      const a = document.createElement('a')
+                      a.href = f.url
+                      a.download = f.name
+                      a.click()
+                    }, i * 200)
+                  })
+                }}
+                className="px-3 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors"
+              >
+                Tümünü İndir ↓
+              </button>
+            )}
+          </div>
           {receivedFiles.map((f, i) => (
             <div key={i} className="flex items-center gap-3 bg-gray-100 dark:bg-gray-800 rounded-xl px-3 py-2.5">
               <PreviewThumb previewUrl={f.previewUrl} mime={f.mime} size="sm" />
@@ -236,9 +288,19 @@ export default function FileTransfer({
                 <span className="text-sm text-gray-900 dark:text-white truncate">{f.name}</span>
                 <span className="text-xs text-gray-500">{fmtBytes(f.size)}</span>
               </div>
-              <a href={f.url} download={f.name} className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors">
-                İndir
-              </a>
+              <div className="flex gap-1.5 shrink-0">
+                {isEditable(f.name, f.size) && (
+                  <button
+                    onClick={() => onEditFile(f.name, f.url)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors"
+                  >
+                    Düzenle
+                  </button>
+                )}
+                <a href={f.url} download={f.name} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors">
+                  İndir
+                </a>
+              </div>
             </div>
           ))}
         </div>

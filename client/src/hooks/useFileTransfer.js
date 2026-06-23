@@ -42,6 +42,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   const [receivedFiles, setReceivedFiles] = useState([])
   const [incomingMeta, setIncomingMeta] = useState(null)
   const [recvProgress, setRecvProgress] = useState(0)
+  const [autoAccept, setAutoAccept]     = useState(false)
   const [recvSpeed, setRecvSpeed]       = useState(0)
   const [recvEta, setRecvEta]           = useState(0)
 
@@ -58,6 +59,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   const sendingRef         = useRef(false) // setSending'in sync yansıması
   const sendQueueRef       = useRef([])    // [{ uid, file }]
   const drainingRef        = useRef(false) // drainQueue tekrarlı çağrı koruması
+  const autoAcceptRef      = useRef(false) // autoAccept'in sync yansıması
 
   // Tamamlanmış OPFS dosyalarını unmount'ta temizle
   useEffect(() => {
@@ -91,6 +93,12 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
 
     if (msg.type === 'FILE_META') {
       if (msg.size > MAX_SIZE) return
+      if (autoAcceptRef.current) {
+        // Auto-accept: pending kuyruğunu atla, direkt kabul et
+        setIncomingMeta({ name: msg.name, size: msg.size })
+        await sendEncrypted({ type: 'FILE_ACCEPT', id: msg.id })
+        return
+      }
       setPendingFiles(prev => [...prev, {
         id: msg.id, name: msg.name, size: msg.size,
         mime: msg.mime, totalChunks: msg.totalChunks, previewUrl: null,
@@ -368,6 +376,23 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     await sendEncrypted({ type: 'FILE_ACCEPT', id })
   }
 
+  async function acceptAll() {
+    autoAcceptRef.current = true
+    setAutoAccept(true)
+    // Şu an bekleyen tüm dosyaları da kabul et
+    const pending = [...pendingFiles]
+    setPendingFiles([])
+    for (const f of pending) {
+      setIncomingMeta({ name: f.name, size: f.size })
+      await sendEncrypted({ type: 'FILE_ACCEPT', id: f.id })
+    }
+  }
+
+  function disableAutoAccept() {
+    autoAcceptRef.current = false
+    setAutoAccept(false)
+  }
+
   async function declineFile(id) {
     setPendingFiles(prev => prev.filter(p => p.id !== id))
     delete previewMapRef.current[id]
@@ -437,7 +462,7 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     // Aksiyonlar
     handleDrop, handleInput, handleResumeFile,
     cancelTransfer, dismissResume,
-    acceptFile, declineFile,
+    acceptFile, declineFile, acceptAll, autoAccept, disableAutoAccept,
     removeFromQueue,
     setSendError,
   }

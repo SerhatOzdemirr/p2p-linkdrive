@@ -52,27 +52,32 @@ export function useRoom(roomId, secretKey) {
       setDcReady(false)
       addMsg('DataChannel kapandı.')
     }
-    dc.onmessage = async (e) => {
-      try {
-        const plain = await decrypt(keyRef.current, e.data)
 
-        const msg = JSON.parse(new TextDecoder().decode(plain))
+    // Mesajları sıralı işle: FILE_START async OPFS kurulumu bitmeden
+    // FILE_CHUNK gelirse chunk düşüyor. Zincir Promise ile önlüyoruz.
+    let msgChain = Promise.resolve()
+    dc.onmessage = (e) => {
+      msgChain = msgChain.then(async () => {
+        try {
+          const plain = await decrypt(keyRef.current, e.data)
+          const msg   = JSON.parse(new TextDecoder().decode(plain))
 
-        if (msg.type === 'PING') {
-          addMsg(`← PING: "${msg.text}"`, 'peer')
-          await sendEncrypted({ type: 'PONG', text: msg.text })
-          return
+          if (msg.type === 'PING') {
+            addMsg(`← PING: "${msg.text}"`, 'peer')
+            await sendEncrypted({ type: 'PONG', text: msg.text })
+            return
+          }
+          if (msg.type === 'PONG') {
+            addMsg(`← PONG: "${msg.text}"`, 'peer')
+            return
+          }
+
+          const handler = handlersRef.current[msg.type]
+          if (handler) await handler(msg)
+        } catch {
+          // Şifre çözme hatası veya JSON parse hatası — zinciri kırma
         }
-        if (msg.type === 'PONG') {
-          addMsg(`← PONG: "${msg.text}"`, 'peer')
-          return
-        }
-
-        const handler = handlersRef.current[msg.type]
-        if (handler) await handler(msg)
-      } catch {
-        addMsg('← şifreli veri çözülemedi', 'system')
-      }
+      })
     }
 
     if (dc.readyState === 'open') {

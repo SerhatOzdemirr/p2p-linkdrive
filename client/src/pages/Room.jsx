@@ -1,22 +1,25 @@
 // pages/Room.jsx
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useRoom } from '../hooks/useRoom.js'
 import { useFileTransfer } from '../hooks/useFileTransfer.js'
 import { useClipboard } from '../hooks/useClipboard.js'
 import { useTheme } from '../hooks/useTheme.js'
 import { useCanvas } from '../hooks/useCanvas.js'
+import { useDocEditor } from '../hooks/useDocEditor.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
 import MessageTest from '../components/MessageTest.jsx'
 import FileTransfer from '../components/FileTransfer.jsx'
 import ClipboardShare from '../components/ClipboardShare.jsx'
 import Canvas from '../components/Canvas.jsx'
+import DocEditor from '../components/DocEditor.jsx'
 
 const TABS = [
   { id: 'files',   label: 'Dosyalar' },
   { id: 'canvas',  label: 'Tahta'    },
   { id: 'text',    label: 'Metin'    },
+  { id: 'editor',  label: 'Editör'   },
   { id: 'test',    label: 'Test'     },
 ]
 
@@ -34,9 +37,18 @@ export default function Room() {
   const fileTransfer = useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessageHandler })
   const clipboard    = useClipboard({ dcReady, sendEncrypted, registerMessageHandler })
   const canvas       = useCanvas({ dcReady, sendEncrypted, registerMessageHandler })
+  const docEditor    = useDocEditor({ dcReady, sendEncrypted, registerMessageHandler })
 
-  // Dosyalar tab'ı badge'i: bekleyen onay veya aktif alım varsa
-  const filesBadge = fileTransfer.pendingFiles.length > 0 || !!fileTransfer.incomingMeta
+  // Tab badge'leri
+  const filesBadge   = fileTransfer.pendingFiles.length > 0 || !!fileTransfer.incomingMeta
+  const editorBadge  = docEditor.editorOpen
+
+  // Editör açılınca otomatik tab geçişi
+  const prevEditorOpen = useRef(false)
+  useEffect(() => {
+    if (docEditor.editorOpen && !prevEditorOpen.current) setActiveTab('editor')
+    prevEditorOpen.current = docEditor.editorOpen
+  }, [docEditor.editorOpen])
 
   if (fatalErr) {
     return (
@@ -80,7 +92,8 @@ export default function Room() {
       {/* Tab çubuğu */}
       <div className="w-full flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-2xl p-1">
         {TABS.map(tab => {
-          const hasBadge = tab.id === 'files' && filesBadge && activeTab !== 'files'
+          const hasBadge = (tab.id === 'files' && filesBadge && activeTab !== 'files') ||
+                           (tab.id === 'editor' && editorBadge && activeTab !== 'editor')
           return (
             <button
               key={tab.id}
@@ -103,7 +116,7 @@ export default function Room() {
       {/* Tab içerikleri — grid stacking: hepsi aynı hücrede, boyut en büyüğe (Tahta) göre sabit kalır */}
       <div className="w-full grid">
         <div style={{ gridArea: '1/1' }} className={activeTab === 'files'  ? '' : 'invisible pointer-events-none'}>
-          <FileTransfer dcReady={dcReady} {...fileTransfer} />
+          <FileTransfer dcReady={dcReady} {...fileTransfer} onEditFile={docEditor.openFromUrl} />
         </div>
         <div style={{ gridArea: '1/1' }} className={activeTab === 'canvas' ? '' : 'invisible pointer-events-none'}>
           <Canvas dcReady={dcReady} {...canvas} />
@@ -111,6 +124,10 @@ export default function Room() {
         <div style={{ gridArea: '1/1' }} className={activeTab === 'text'   ? '' : 'invisible pointer-events-none'}>
           <ClipboardShare dcReady={dcReady} {...clipboard} />
         </div>
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'editor' ? '' : 'invisible pointer-events-none'}>
+          <DocEditor dcReady={dcReady} {...docEditor} />
+        </div>
+
         <div style={{ gridArea: '1/1' }} className={activeTab === 'test'   ? '' : 'invisible pointer-events-none'}>
           <MessageTest dcReady={dcReady} messages={messages} onSend={sendPing} />
         </div>
