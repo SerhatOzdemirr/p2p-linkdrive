@@ -106,12 +106,44 @@ export function useRoom(roomId, secretKey) {
       const socket = connectSocket()
       socketRef.current = socket
 
+      // ── Otomatik yeniden bağlanma (mobilde dosya seçici arka plana atınca kopuyor) ──
+      let reconnectTimer    = null
+      let reconnectAttempts = 0
+
+      async function tryReconnect() {
+        if (destroyed || roleRef.current !== 'host') return
+        if (peer.connectionState === 'connected') { reconnectAttempts = 0; return }
+        if (reconnectAttempts >= 6) {
+          addMsg('⚠ Yeniden bağlanılamadı — sayfayı yenileyin.')
+          return
+        }
+        reconnectAttempts++
+        addMsg(`⟳ Yeniden bağlanılıyor (${reconnectAttempts})...`)
+        try {
+          const offer = await peer.restartIce()
+          socket.emit('offer', { roomId, offer })
+        } catch { /* tekrar denenecek */ }
+        reconnectTimer = setTimeout(tryReconnect, 4000)
+      }
+
       const peer = new PeerConnection({
         onDataChannel:    (dc) => setupDC(dc),
         onConnectionChange: (state) => {
           if (destroyed) return
           setConnState(state)
           addMsg(`⟳ Bağlantı: ${state}`)
+
+          if (state === 'connected') {
+            clearTimeout(reconnectTimer)
+            reconnectAttempts = 0
+          }
+          // Geçici kopma — host ICE restart ile kurtarmayı dener
+          if (state === 'disconnected' || state === 'failed') {
+            if (roleRef.current === 'host') {
+              clearTimeout(reconnectTimer)
+              reconnectTimer = setTimeout(tryReconnect, state === 'failed' ? 800 : 3000)
+            }
+          }
         },
         onIceCandidate: (candidate) => {
           socket.emit('ice_candidate', { roomId, candidate })

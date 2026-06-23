@@ -73,6 +73,13 @@ export class PeerConnection {
     return offer
   }
 
+  /** ICE'i yeniden başlat — kopan bağlantıyı kurtarır (sadece host çağırmalı) */
+  async restartIce() {
+    const offer = await this.pc.createOffer({ iceRestart: true })
+    await this.pc.setLocalDescription(offer)
+    return offer
+  }
+
   async handleOffer(offer) {
     await this.pc.setRemoteDescription(offer)
     const answer = await this.pc.createAnswer()
