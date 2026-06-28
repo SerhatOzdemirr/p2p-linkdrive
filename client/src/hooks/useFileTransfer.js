@@ -10,22 +10,6 @@ const HIGH_WATERMARK = 8 * CHUNK_SIZE    // 1 MB — bu dolunca dur
 const LOW_WATERMARK  = CHUNK_SIZE        // 128 KB — buna düşünce devam et
 const MAX_SIZE       = 50 * 1024 ** 3
 
-function savePending(id, info) {
-  try {
-    const p = JSON.parse(localStorage.getItem('linkdrive_pending') || '{}')
-    p[id] = info
-    localStorage.setItem('linkdrive_pending', JSON.stringify(p))
-  } catch {}
-}
-
-function removePending(id) {
-  try {
-    const p = JSON.parse(localStorage.getItem('linkdrive_pending') || '{}')
-    delete p[id]
-    localStorage.setItem('linkdrive_pending', JSON.stringify(p))
-  } catch {}
-}
-
 export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessageHandler }) {
   // ── Gönderen state ──────────────────────────────────────────────────────
   const [sending, setSending]           = useState(false)
@@ -50,7 +34,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
 
   // ── Ortak state ─────────────────────────────────────────────────────────
   const [dragOver, setDragOver]           = useState(false)
-  const [resumeRequest, setResumeRequest] = useState(null)
 
   // ── Ref'ler ─────────────────────────────────────────────────────────────
   const incoming           = useRef({})
@@ -88,32 +71,19 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     flushTimerRef.current = setTimeout(flushView, 100)
   }
 
-  // Tamamlanmış OPFS dosyalarını unmount'ta temizle
+  // OPFS'e yazılan geçici dosyaları unmount'ta temizle
   useEffect(() => {
     return () => {
       ;(async () => {
         try {
-          const root    = await navigator.storage.getDirectory()
-          const pending = JSON.parse(localStorage.getItem('linkdrive_pending') || '{}')
+          const root = await navigator.storage.getDirectory()
           for (const name of opfsNames.current) {
-            const id = name.replace('linkdrive_', '')
-            if (!pending[id]) {
-              try { await root.removeEntry(name) } catch {}
-            }
+            try { await root.removeEntry(name) } catch {}
           }
         } catch {}
       })()
     }
   }, [])
-
-  // Peer bağlandığında yarıda kalan transferleri bildir
-  useEffect(() => {
-    if (!dcReady) return
-    const pending = JSON.parse(localStorage.getItem('linkdrive_pending') || '{}')
-    Object.values(pending).forEach(info => {
-      sendEncrypted({ type: 'FILE_RESUME_REQUEST', id: info.id, name: info.name, size: info.size, totalChunks: info.totalChunks, fromChunk: info.receivedChunks })
-    })
-  }, [dcReady]) // eslint-disable-line
 
   // ── Mesaj yöneticisi ────────────────────────────────────────────────────
   const handleMessage = useCallback(async (msg) => {
@@ -173,35 +143,10 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
         transfer = { meta: msg, chunks: new Array(Math.max(msg.totalChunks, 1)), mode: 'memory', received: 0, startTime: Date.now(), bytesReceived: 0 }
       }
       incoming.current[msg.id] = transfer
-      savePending(msg.id, { id: msg.id, name: msg.name, size: msg.size, totalChunks: msg.totalChunks, mime: msg.mime, receivedChunks: 0 })
       setIncomingMeta({ name: msg.name, size: msg.size })
       setRecvProgress(0)
       setRecvSpeed(0)
       setRecvEta(0)
-    }
-
-    else if (msg.type === 'FILE_RESUME_START') {
-      if (msg.size > MAX_SIZE) return
-      let transfer
-      try {
-        const root       = await navigator.storage.getDirectory()
-        const opfsName   = `linkdrive_${msg.id}`
-        const fileHandle = await root.getFileHandle(opfsName, { create: true })
-        const writable   = await fileHandle.createWritable({ keepExistingData: true })
-        await writable.seek(msg.fromChunk * CHUNK_SIZE)
-        if (!opfsNames.current.includes(opfsName)) opfsNames.current.push(opfsName)
-        const bytesDone = msg.fromChunk * CHUNK_SIZE
-        transfer = { meta: msg, writable, fileHandle, mode: 'opfs', received: msg.fromChunk, startTime: Date.now(), bytesReceived: bytesDone }
-      } catch {
-        transfer = { meta: msg, chunks: new Array(Math.max(msg.totalChunks, 1)), mode: 'memory', received: msg.fromChunk, startTime: Date.now(), bytesReceived: msg.fromChunk * CHUNK_SIZE }
-      }
-      incoming.current[msg.id] = transfer
-      setIncomingMeta({ name: msg.name, size: msg.size })
-      setRecvProgress((msg.fromChunk / Math.max(msg.totalChunks, 1)) * 100)
-    }
-
-    else if (msg.type === 'FILE_RESUME_REQUEST') {
-      setResumeRequest(msg)
     }
 
     else if (msg.type === 'FILE_CHUNK') {
@@ -224,7 +169,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       setRecvProgress((t.bytesReceived / Math.max(t.meta.size, 1)) * 100)
       setRecvSpeed(speed)
       setRecvEta(remaining / speed)
-      savePending(msg.id, { id: msg.id, name: t.meta.name, size: t.meta.size, totalChunks: t.meta.totalChunks, mime: t.meta.mime, receivedChunks: t.received })
     }
 
     else if (msg.type === 'FILE_END') {
@@ -241,7 +185,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       }
       const previewUrl = previewMapRef.current[msg.id] ?? null
       delete previewMapRef.current[msg.id]
-      removePending(msg.id)
       setReceivedFiles(prev => [...prev, { name: t.meta.name, size: t.meta.size, mime: t.meta.mime, url, previewUrl }])
       setIncomingMeta(null)
       setRecvProgress(0)
@@ -268,18 +211,16 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     const types = [
       'FILE_META', 'FILE_PREVIEW', 'FILE_WITHDRAW',
       'FILE_ACCEPT', 'FILE_DECLINE',
-      'FILE_START', 'FILE_RESUME_START', 'FILE_RESUME_REQUEST',
-      'FILE_CHUNK', 'FILE_END', 'FILE_CANCEL',
+      'FILE_START', 'FILE_CHUNK', 'FILE_END', 'FILE_CANCEL',
     ]
     types.forEach(t => registerMessageHandler(t, handleMessage))
   }, []) // eslint-disable-line
 
   // ── Tekil dosya gönder ──────────────────────────────────────────────────
-  async function sendFile(file, fromChunk = 0, resumeId = null) {
+  async function sendFile(file) {
     if (!dcReady || !dcRef.current || sendingRef.current) return
-    const dc         = dcRef.current
-    const isResume   = fromChunk > 0 || resumeId !== null
-    const id         = resumeId || crypto.randomUUID()
+    const dc          = dcRef.current
+    const id          = crypto.randomUUID()
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1
 
     cancelRef.current  = false
@@ -289,26 +230,24 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     setSendError('')
 
     try {
-      if (!isResume) {
-        const previewUrl = await generatePreview(file)
-        await sendEncrypted({ type: 'FILE_META', id, name: file.name, size: file.size, mime: file.type, totalChunks })
-        if (previewUrl) await sendEncrypted({ type: 'FILE_PREVIEW', id, dataUrl: previewUrl })
+      const previewUrl = await generatePreview(file)
+      await sendEncrypted({ type: 'FILE_META', id, name: file.name, size: file.size, mime: file.type, totalChunks })
+      if (previewUrl) await sendEncrypted({ type: 'FILE_PREVIEW', id, dataUrl: previewUrl })
 
-        setWaitingAccept({ id, name: file.name, previewUrl })
-        const accepted = await new Promise(resolve => {
-          acceptResolversRef.current[id] = resolve
-        })
-        setWaitingAccept(null)
+      setWaitingAccept({ id, name: file.name, previewUrl })
+      const accepted = await new Promise(resolve => {
+        acceptResolversRef.current[id] = resolve
+      })
+      setWaitingAccept(null)
 
-        if (!accepted || cancelRef.current) {
-          if (cancelRef.current) await sendEncrypted({ type: 'FILE_WITHDRAW', id })
-          return
-        }
+      if (!accepted || cancelRef.current) {
+        if (cancelRef.current) await sendEncrypted({ type: 'FILE_WITHDRAW', id })
+        return
       }
 
-      let bytesSent = fromChunk * CHUNK_SIZE
+      let bytesSent = 0
       const startTime = Date.now()
-      sendProgressRef.current = (bytesSent / Math.max(file.size, 1)) * 100
+      sendProgressRef.current = 0
       sendSpeedRef.current    = 0
       sendEtaRef.current      = 0
       scheduleFlush()
@@ -316,10 +255,9 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
       // Event-driven backpressure için threshold'u bir kez ayarla
       dc.bufferedAmountLowThreshold = LOW_WATERMARK
 
-      const msgType = fromChunk > 0 ? 'FILE_RESUME_START' : 'FILE_START'
-      await sendEncrypted({ type: msgType, id, name: file.name, size: file.size, totalChunks, mime: file.type, fromChunk })
+      await sendEncrypted({ type: 'FILE_START', id, name: file.name, size: file.size, totalChunks, mime: file.type })
 
-      for (let i = fromChunk; i < totalChunks; i++) {
+      for (let i = 0; i < totalChunks; i++) {
         if (cancelRef.current) {
           await sendEncrypted({ type: 'FILE_CANCEL', id })
           break
@@ -461,21 +399,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     await sendEncrypted({ type: 'FILE_DECLINE', id })
   }
 
-  // ── Resume akışı ────────────────────────────────────────────────────────
-  async function handleResumeFile(e) {
-    const file = e.target.files[0]
-    e.target.value = ''
-    if (!file) return
-    if (file.name !== resumeRequest.name || file.size !== resumeRequest.size) {
-      setSendError(`Yanlış dosya — "${resumeRequest.name}" seçin.`)
-      setResumeRequest(null)
-      return
-    }
-    const req = resumeRequest
-    setResumeRequest(null)
-    await sendFile(file, req.fromChunk, req.id)
-  }
-
   // ── Drop / input ────────────────────────────────────────────────────────
   function handleDrop(e) {
     e.preventDefault()
@@ -510,11 +433,6 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     setBatchDone(0)
   }
 
-  function dismissResume() {
-    removePending(resumeRequest?.id)
-    setResumeRequest(null)
-  }
-
   return {
     // Gönderen
     sending, sendProgress, sendingName, sendError, sendSpeed, sendEta,
@@ -524,10 +442,9 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     incomingMeta, recvProgress, recvSpeed, recvEta,
     // Ortak UI
     dragOver, setDragOver,
-    resumeRequest,
     // Aksiyonlar
-    handleDrop, handleInput, handleResumeFile,
-    cancelTransfer, dismissResume,
+    handleDrop, handleInput,
+    cancelTransfer,
     acceptFile, declineFile, acceptAll, autoAccept, disableAutoAccept,
     removeFromQueue,
     setSendError,

@@ -112,6 +112,7 @@ export function useRoom(roomId, secretKey) {
       let isInitiator       = false
       let reconnectTimer    = null
       let reconnectAttempts = 0
+      let negotiating       = false
 
       const onConnChange = (state) => {
         if (destroyed) return
@@ -140,8 +141,12 @@ export function useRoom(roomId, secretKey) {
 
       // Odada zaten olan taraf: temiz bağlantı kurup offer üretir
       async function becomeInitiator() {
+        if (negotiating) return        // çift negotiation'ı önle (peer_left + peer_joined yarışı)
+        negotiating = true
         clearTimeout(reconnectTimer)
         isInitiator = true
+        roleRef.current = 'host'
+        setRole('host')
         buildPeer()
         setConnState('connecting')
         peer.createDataChannel('linkdrive') // onDataChannel → setupDC
@@ -150,11 +155,14 @@ export function useRoom(roomId, secretKey) {
           socket.emit('offer', { roomId, offer })
           addMsg('→ Offer gönderildi.')
         } catch { addMsg('Offer üretilemedi.') }
+        negotiating = false
       }
 
       // Yeni katılan taraf: gelen offer'a temiz bağlantıyla cevap verir
       async function becomeAnswerer(offer) {
         isInitiator = false
+        roleRef.current = 'guest'
+        setRole('guest')
         buildPeer()
         setConnState('connecting')
         try {
@@ -235,7 +243,12 @@ export function useRoom(roomId, secretKey) {
 
       socket.on('peer_left', () => {
         if (destroyed) return
-        addMsg('⚠ Karşı taraf ayrıldı.')
+        // Karşı taraf socket'ten ayrıldı (refresh veya çıkış).
+        // Reconnect timer'ını durdur — temiz dönüş 'peer_joined' ile gelecek,
+        // aksi halde tryReconnect + peer_joined çift negotiation yapıp kanalı bozuyor.
+        clearTimeout(reconnectTimer)
+        reconnectAttempts = 0
+        addMsg('⚠ Karşı taraf ayrıldı — yeniden katılması bekleniyor.')
         setConnState('disconnected')
         setDcReady(false)
       })
