@@ -113,6 +113,7 @@ export function useRoom(roomId, secretKey) {
       let reconnectTimer    = null
       let reconnectAttempts = 0
       let negotiating       = false
+      let hasConnectedOnce  = false
 
       const onConnChange = (state) => {
         if (destroyed) return
@@ -190,6 +191,8 @@ export function useRoom(roomId, secretKey) {
       socket.on('connect', () => {
         if (destroyed) return
         addMsg(`✓ Sunucuya bağlandı. (${socket.id.slice(0, 8)}...)`)
+        hasConnectedOnce = true
+        // Her (yeniden) bağlanmada odaya tekrar katıl → rejoin akışı tetiklenir
         socket.emit('create_room', { roomId })
       })
 
@@ -260,7 +263,14 @@ export function useRoom(roomId, secretKey) {
 
       socket.on('connect_error', (err) => {
         if (destroyed) return
-        setFatalErr(`Sunucuya bağlanılamadı: ${err.message}`)
+        // Sadece İLK bağlantı başarısızsa fatal. Sonraki (reconnect) xhr poll error'ları
+        // geçici — Socket.io kendi yeniden dener; odayı kapatma.
+        if (!hasConnectedOnce) {
+          setFatalErr(`Sunucuya bağlanılamadı: ${err.message}`)
+        } else {
+          addMsg(`⟳ Sunucu bağlantısı koptu, yeniden deneniyor... (${err.message})`)
+          setConnState('connecting')
+        }
       })
 
       // ── Mobil: dosya seçici/arka plandan dönünce bağlantıyı anında kurtar ──

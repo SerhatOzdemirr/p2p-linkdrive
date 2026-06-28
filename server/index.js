@@ -14,6 +14,9 @@ const io = new Server(server, {
     origin: process.env.CLIENT_URL || 'http://localhost:5173',
     methods: ['GET', 'POST'],
   },
+  // Mobilde kısa arka plan kesintilerinde socket'i hemen düşürme
+  pingInterval: 25000,
+  pingTimeout: 60000,
 });
 
 // Sağlık kontrolü

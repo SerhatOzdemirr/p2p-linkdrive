@@ -9,7 +9,15 @@ let socket = null
 
 export function getSocket() {
   if (!socket) {
-    const opts = { autoConnect: false }
+    const opts = {
+      autoConnect: false,
+      transports: ['websocket', 'polling'], // websocket önce → mobilde xhr poll error azalır
+      reconnection: true,
+      reconnectionAttempts: Infinity,        // asla pes etme (uzun arka plandan dönüş)
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    }
     socket = SERVER_URL ? io(SERVER_URL, opts) : io(opts)
   }
   return socket
