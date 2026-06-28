@@ -106,6 +106,14 @@ io.on('connection', (socket) => {
     if (other) io.to(other).emit('ice_candidate', { candidate });
   });
 
+  // Yeniden bağlanma: dönen taraf (answerer) karşı taraftan offer ister
+  socket.on('request_offer', ({ roomId }) => {
+    if (isRateLimited(socket.id)) return;
+    if (!roomId || !ROOM_ID_RE.test(roomId)) return;
+    const other = getOtherPeer(roomId, socket.id);
+    if (other) io.to(other).emit('make_offer');
+  });
+
   // ── Ayrılma / bağlantı kopması ───────────────────────────────────────────
   socket.on('leave_room', () => handleLeave(socket));
   socket.on('disconnect', () => {

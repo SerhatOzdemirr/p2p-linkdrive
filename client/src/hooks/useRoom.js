@@ -93,6 +93,7 @@ export function useRoom(roomId, secretKey) {
     }
 
     let destroyed = false
+    let removeVisibility = () => {}
 
     async function init() {
       try {
@@ -225,6 +226,13 @@ export function useRoom(roomId, secretKey) {
         try { await peer.addIceCandidate(candidate) } catch {}
       })
 
+      // Karşı taraf "offer iste" dedi (o, arka plandan döndü) → ben offer üretirim
+      socket.on('make_offer', () => {
+        if (destroyed) return
+        addMsg('← Yeniden bağlanma isteği — offer üretiliyor.')
+        becomeInitiator()
+      })
+
       socket.on('peer_left', () => {
         if (destroyed) return
         addMsg('⚠ Karşı taraf ayrıldı.')
@@ -242,6 +250,20 @@ export function useRoom(roomId, secretKey) {
         setFatalErr(`Sunucuya bağlanılamadı: ${err.message}`)
       })
 
+      // ── Mobil: dosya seçici/arka plandan dönünce bağlantıyı anında kurtar ──
+      // ICE'in kopmayı fark etmesini (saniyeler) bekleme; visible olur olmaz tetikle.
+      const onVisible = () => {
+        if (destroyed || document.visibilityState !== 'visible') return
+        if (peer?.connectionState === 'connected') return
+        reconnectAttempts = 0
+        clearTimeout(reconnectTimer)
+        addMsg('⟳ Öne geldi — bağlantı kontrol ediliyor...')
+        if (isInitiator) becomeInitiator()           // ben offer üretebilirim
+        else socket.emit('request_offer', { roomId }) // karşıdan offer iste
+      }
+      document.addEventListener('visibilitychange', onVisible)
+      removeVisibility = () => document.removeEventListener('visibilitychange', onVisible)
+
       socket.connect()
     }
 
@@ -249,6 +271,7 @@ export function useRoom(roomId, secretKey) {
 
     return () => {
       destroyed = true
+      removeVisibility()
       peerRef.current?.close()
       disconnectSocket()
     }
