@@ -54,7 +54,9 @@ io.on('connection', (socket) => {
         return;
       }
       socket.join(roomId);
-      io.to(roomId).emit('peer_joined', { peerCount: joinResult.peerCount });
+      // Odada zaten olanlar initiator olur; yeni katılan (sender) bekler
+      socket.to(roomId).emit('peer_joined', { peerCount: joinResult.peerCount });
+      socket.emit('room_joined', { peerCount: joinResult.peerCount });
       console.log(`[Room] Katıldı (guest): ${socket.id} → ${roomId}`);
     }
   });
@@ -76,7 +78,8 @@ io.on('connection', (socket) => {
     }
 
     socket.join(roomId);
-    io.to(roomId).emit('peer_joined', { peerCount: result.peerCount });
+    socket.to(roomId).emit('peer_joined', { peerCount: result.peerCount });
+    socket.emit('room_joined', { peerCount: result.peerCount });
     console.log(`[Room] Katıldı: ${socket.id} → ${roomId}`);
   });
 

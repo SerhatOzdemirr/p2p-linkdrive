@@ -1,5 +1,5 @@
 // components/FileTransfer.jsx — pure UI
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { isEditable } from '../hooks/useDocEditor.js'
 import { isHeicName, convertAndDownload } from '../core/heic.js'
 import { zipAndDownload } from '../core/zip.js'
@@ -86,6 +86,31 @@ function ReceivedFileRow({ f, onEditFile }) {
     </div>
   )
 }
+
+// Gönderme kuyruğu listesi — memo: sadece queuedFiles değişince render olur,
+// sending/progress storm'unda (per-file setState) yeniden çizilmez
+const SendQueueList = memo(function SendQueueList({ queuedFiles, removeFromQueue }) {
+  if (queuedFiles.length === 0) return null
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+        Sırada ({queuedFiles.length})
+      </p>
+      {queuedFiles.map(({ uid, file }) => (
+        <div key={uid} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-xl px-3 py-2">
+          <span className="text-sm text-gray-900 dark:text-white truncate flex-1">{file.name}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{fmtBytes(file.size)}</span>
+          <button
+            onClick={() => removeFromQueue(uid)}
+            className="shrink-0 text-gray-400 hover:text-red-400 dark:hover:text-red-400 transition-colors text-xs leading-none"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+})
 
 // Kompakt grid hücresi — çok dosya olunca isim gizli, yan yana
 function ReceivedFileCell({ f }) {
@@ -339,26 +364,8 @@ export default function FileTransfer({
         </div>
       )}
 
-      {/* Gönderme kuyruğu */}
-      {queuedFiles.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-            Sırada ({queuedFiles.length})
-          </p>
-          {queuedFiles.map(({ uid, file }) => (
-            <div key={uid} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-xl px-3 py-2">
-              <span className="text-sm text-gray-900 dark:text-white truncate flex-1">{file.name}</span>
-              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{fmtBytes(file.size)}</span>
-              <button
-                onClick={() => removeFromQueue(uid)}
-                className="shrink-0 text-gray-400 hover:text-red-400 dark:hover:text-red-400 transition-colors text-xs leading-none"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Gönderme kuyruğu — memo'lu, sending/progress storm'unda yeniden çizilmez */}
+      <SendQueueList queuedFiles={queuedFiles} removeFromQueue={removeFromQueue} />
 
       {/* Auto-accept aktif göstergesi */}
       {autoAccept && (

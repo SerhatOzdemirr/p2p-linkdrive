@@ -48,6 +48,33 @@ export class PeerConnection {
       this._setupDataChannel(channel)
       this._onDataChannel(channel)
     }
+
+    // Uzak medya track'i geldi (sesli/görüntülü arama)
+    pc.ontrack = (e) => { this._onTrack?.(e) }
+  }
+
+  // ── Medya (arama) ────────────────────────────────────────────────────────
+  setOnTrack(cb) { this._onTrack = cb }
+
+  addLocalStream(stream) {
+    for (const track of stream.getTracks()) this.pc.addTrack(track, stream)
+  }
+
+  /** Mevcut bağlantı üzerinde medya için yeniden anlaşma offer'ı */
+  async createRenegotiationOffer() {
+    const offer = await this.pc.createOffer()
+    await this.pc.setLocalDescription(offer)
+    return offer
+  }
+
+  /** Arama biterken yerel track'leri durdur ve kaldır */
+  stopLocalTracks() {
+    for (const sender of this.pc.getSenders()) {
+      if (sender.track) {
+        sender.track.stop()
+        try { this.pc.removeTrack(sender) } catch {}
+      }
+    }
   }
 
   /** Host DataChannel açar */

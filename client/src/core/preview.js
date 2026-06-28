@@ -49,10 +49,8 @@ async function videoFirstFrame(file) {
 async function pdfFirstPage(file) {
   try {
     const pdfjs = await import('pdfjs-dist')
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).href
+    const { default: workerUrl } = await import('pdfjs-dist/build/pdf.worker.min.mjs?url')
+    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
     const buf  = await file.arrayBuffer()
     const pdf  = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise

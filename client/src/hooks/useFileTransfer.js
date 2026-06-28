@@ -65,6 +65,29 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
   const batchTotalRef      = useRef(0)     // batchTotal'ın sync yansıması
   const batchDoneRef       = useRef(0)     // batchDone'ın sync yansıması
 
+  // ── Throttle: hot değerler ref'te, state'e seyrek flush (render fırtınasını önler) ──
+  const sendProgressRef = useRef(0)
+  const sendSpeedRef    = useRef(0)
+  const sendEtaRef      = useRef(0)
+  const flushTimerRef   = useRef(null)
+
+  // Ref'lerdeki güncel değerleri state'e bas (React 18 timer içinde otomatik batch'ler → tek render)
+  function flushView() {
+    clearTimeout(flushTimerRef.current)
+    flushTimerRef.current = null
+    setSendProgress(sendProgressRef.current)
+    setSendSpeed(sendSpeedRef.current)
+    setSendEta(sendEtaRef.current)
+    setBatchDone(batchDoneRef.current)
+    setQueuedFiles([...sendQueueRef.current])
+  }
+
+  // En fazla 100ms'de bir flush — yüzlerce güncelleme tek render'a iner
+  function scheduleFlush() {
+    if (flushTimerRef.current) return
+    flushTimerRef.current = setTimeout(flushView, 100)
+  }
+
   // Tamamlanmış OPFS dosyalarını unmount'ta temizle
   useEffect(() => {
     return () => {
@@ -285,9 +308,10 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
 
       let bytesSent = fromChunk * CHUNK_SIZE
       const startTime = Date.now()
-      setSendProgress((bytesSent / Math.max(file.size, 1)) * 100)
-      setSendSpeed(0)
-      setSendEta(0)
+      sendProgressRef.current = (bytesSent / Math.max(file.size, 1)) * 100
+      sendSpeedRef.current    = 0
+      sendEtaRef.current      = 0
+      scheduleFlush()
 
       // Event-driven backpressure için threshold'u bir kez ayarla
       dc.bufferedAmountLowThreshold = LOW_WATERMARK
@@ -316,19 +340,26 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
         const elapsed   = (Date.now() - startTime) / 1000 || 0.001
         const speed     = bytesSent / elapsed
         const remaining = file.size - bytesSent
-        setSendSpeed(speed)
-        setSendEta(remaining / speed)
-        setSendProgress((bytesSent / Math.max(file.size, 1)) * 100)
+        sendSpeedRef.current    = speed
+        sendEtaRef.current      = remaining / speed
+        sendProgressRef.current = (bytesSent / Math.max(file.size, 1)) * 100
+        scheduleFlush() // throttled — her chunk'ta değil, ~100ms'de bir render
       }
 
       if (!cancelRef.current) {
         await sendEncrypted({ type: 'FILE_END', id })
-        setSendProgress(100)
+        sendProgressRef.current = 100
+        scheduleFlush()
       }
     } catch (err) {
       setSendError(err?.message || 'Dosya gönderilemedi.')
     } finally {
       sendingRef.current = false
+      // Bekleyen throttle flush'ını iptal et, ref'leri sıfırla
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+      sendSpeedRef.current  = 0
+      sendEtaRef.current    = 0
       setSending(false)
       setSendingName('')
       setSendSpeed(0)
@@ -346,23 +377,23 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
 
     while (sendQueueRef.current.length > 0) {
       const entry = sendQueueRef.current.shift()
-      setQueuedFiles([...sendQueueRef.current])
+      scheduleFlush() // kuyruk değişti — throttled flush
       cancelRef.current = false
       await sendFile(entry.file)
       if (cancelRef.current) {
         // İptal sonrası kuyruğu ve batch sayaçlarını temizle
         sendQueueRef.current = []
-        setQueuedFiles([])
         batchTotalRef.current = 0
         batchDoneRef.current  = 0
         setBatchTotal(0)
-        setBatchDone(0)
+        flushView()
         break
       }
       // Dosya tamamlandı (gönderildi/reddedildi) → batch sayacını artır
       batchDoneRef.current++
-      setBatchDone(batchDoneRef.current)
+      scheduleFlush() // throttled — 500 dosyada per-file render fırtınası olmasın
     }
+    flushView() // batch bitti — son durumu kesinleştir
 
     drainingRef.current = false
     // Batch bitti — bir süre sonra göstergeyi sıfırla
@@ -393,10 +424,11 @@ export function useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessage
     drainQueue()
   }
 
-  function removeFromQueue(uid) {
+  // Stable referans — memo'lu kuyruk listesinin gereksiz render'ını önler
+  const removeFromQueue = useCallback((uid) => {
     sendQueueRef.current = sendQueueRef.current.filter(e => e.uid !== uid)
     setQueuedFiles(prev => prev.filter(e => e.uid !== uid))
-  }
+  }, [])
 
   // ── Alıcı: kabul / reddet ───────────────────────────────────────────────
   async function acceptFile(id) {

@@ -5,22 +5,23 @@ import { useRoom } from '../hooks/useRoom.js'
 import { useFileTransfer } from '../hooks/useFileTransfer.js'
 import { useClipboard } from '../hooks/useClipboard.js'
 import { useTheme } from '../hooks/useTheme.js'
-import { useCanvas } from '../hooks/useCanvas.js'
 import { useDocEditor } from '../hooks/useDocEditor.js'
+import { useChat } from '../hooks/useChat.js'
+import { useCall } from '../hooks/useCall.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
-import MessageTest from '../components/MessageTest.jsx'
 import FileTransfer from '../components/FileTransfer.jsx'
 import ClipboardShare from '../components/ClipboardShare.jsx'
-import Canvas from '../components/Canvas.jsx'
 import DocEditor from '../components/DocEditor.jsx'
+import Chat from '../components/Chat.jsx'
+import Call from '../components/Call.jsx'
 
 const TABS = [
-  { id: 'files',   label: 'Dosyalar' },
-  { id: 'canvas',  label: 'Tahta'    },
-  { id: 'text',    label: 'Metin'    },
-  { id: 'editor',  label: 'Editör'   },
-  { id: 'test',    label: 'Test'     },
+  { id: 'files',  label: 'Dosyalar' },
+  { id: 'call',   label: 'Arama'    },
+  { id: 'chat',   label: 'Sohbet'   },
+  { id: 'text',   label: 'Metin'    },
+  { id: 'editor', label: 'Editör'   },
 ]
 
 export default function Room() {
@@ -31,17 +32,20 @@ export default function Room() {
 
   const {
     role, connState, dcReady, fatalErr,
-    messages, dcRef, sendEncrypted, registerMessageHandler, sendPing,
+    dcRef, peerRef, sendEncrypted, registerMessageHandler,
   } = useRoom(roomId, secretKey)
 
   const fileTransfer = useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessageHandler })
   const clipboard    = useClipboard({ dcReady, sendEncrypted, registerMessageHandler })
-  const canvas       = useCanvas({ dcReady, sendEncrypted, registerMessageHandler })
   const docEditor    = useDocEditor({ dcReady, sendEncrypted, registerMessageHandler })
+  const chat         = useChat({ dcReady, sendEncrypted, registerMessageHandler })
+  const call         = useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandler })
 
   // Tab badge'leri
-  const filesBadge   = fileTransfer.pendingFiles.length > 0 || !!fileTransfer.incomingMeta
-  const editorBadge  = docEditor.editorOpen
+  const filesBadge  = fileTransfer.pendingFiles.length > 0 || !!fileTransfer.incomingMeta
+  const editorBadge = docEditor.editorOpen
+  const chatBadge   = chat.unread > 0
+  const callBadge   = call.callState === 'incoming'
 
   // Editör açılınca otomatik tab geçişi
   const prevEditorOpen = useRef(false)
@@ -49,6 +53,18 @@ export default function Room() {
     if (docEditor.editorOpen && !prevEditorOpen.current) setActiveTab('editor')
     prevEditorOpen.current = docEditor.editorOpen
   }, [docEditor.editorOpen])
+
+  // Gelen arama / aktif görüşmede Arama sekmesine geç
+  const prevCallState = useRef('idle')
+  useEffect(() => {
+    if (call.callState !== 'idle' && prevCallState.current === 'idle') setActiveTab('call')
+    prevCallState.current = call.callState
+  }, [call.callState])
+
+  // Sohbet sekmesi aktifken okunmadı sayacını sıfırla
+  useEffect(() => {
+    if (activeTab === 'chat') chat.clearUnread()
+  }, [activeTab, chat.messages.length]) // eslint-disable-line
 
   if (fatalErr) {
     return (
@@ -92,8 +108,10 @@ export default function Room() {
       {/* Tab çubuğu */}
       <div className="w-full flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-2xl p-1">
         {TABS.map(tab => {
-          const hasBadge = (tab.id === 'files' && filesBadge && activeTab !== 'files') ||
-                           (tab.id === 'editor' && editorBadge && activeTab !== 'editor')
+          const hasBadge = (tab.id === 'files'  && filesBadge  && activeTab !== 'files') ||
+                           (tab.id === 'editor' && editorBadge && activeTab !== 'editor') ||
+                           (tab.id === 'chat'   && chatBadge   && activeTab !== 'chat') ||
+                           (tab.id === 'call'   && callBadge   && activeTab !== 'call')
           return (
             <button
               key={tab.id}
@@ -106,30 +124,31 @@ export default function Room() {
             >
               {tab.label}
               {hasBadge && (
-                <span className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />
+                <span className="absolute top-1.5 right-2 min-w-[8px] h-2 px-1 flex items-center justify-center bg-red-500 rounded-full text-[9px] text-white leading-none">
+                  {tab.id === 'chat' && chat.unread > 0 ? chat.unread : ''}
+                </span>
               )}
             </button>
           )
         })}
       </div>
 
-      {/* Tab içerikleri — grid stacking: hepsi aynı hücrede, boyut en büyüğe (Tahta) göre sabit kalır */}
+      {/* Tab içerikleri — grid stacking: hepsi aynı hücrede, boyut en büyüğe göre sabit kalır */}
       <div className="w-full grid">
         <div style={{ gridArea: '1/1' }} className={activeTab === 'files'  ? '' : 'invisible pointer-events-none'}>
           <FileTransfer dcReady={dcReady} {...fileTransfer} onEditFile={docEditor.openFromUrl} />
         </div>
-        <div style={{ gridArea: '1/1' }} className={activeTab === 'canvas' ? '' : 'invisible pointer-events-none'}>
-          <Canvas dcReady={dcReady} {...canvas} />
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'call'   ? '' : 'invisible pointer-events-none'}>
+          <Call dcReady={dcReady} {...call} />
+        </div>
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'chat'   ? '' : 'invisible pointer-events-none'}>
+          <Chat dcReady={dcReady} {...chat} />
         </div>
         <div style={{ gridArea: '1/1' }} className={activeTab === 'text'   ? '' : 'invisible pointer-events-none'}>
           <ClipboardShare dcReady={dcReady} {...clipboard} />
         </div>
         <div style={{ gridArea: '1/1' }} className={activeTab === 'editor' ? '' : 'invisible pointer-events-none'}>
           <DocEditor dcReady={dcReady} {...docEditor} />
-        </div>
-
-        <div style={{ gridArea: '1/1' }} className={activeTab === 'test'   ? '' : 'invisible pointer-events-none'}>
-          <MessageTest dcReady={dcReady} messages={messages} onSend={sendPing} />
         </div>
       </div>
 

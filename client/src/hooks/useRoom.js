@@ -106,50 +106,77 @@ export function useRoom(roomId, secretKey) {
       const socket = connectSocket()
       socketRef.current = socket
 
-      // ── Otomatik yeniden bağlanma (mobilde dosya seçici arka plana atınca kopuyor) ──
+      // ── Bağlantı kurulumu (refresh/rejoin'e dayanıklı — tam yeniden anlaşma) ──
+      let peer              = null
+      let isInitiator       = false
       let reconnectTimer    = null
       let reconnectAttempts = 0
 
+      const onConnChange = (state) => {
+        if (destroyed) return
+        setConnState(state)
+        addMsg(`⟳ Bağlantı: ${state}`)
+        if (state === 'connected') {
+          clearTimeout(reconnectTimer)
+          reconnectAttempts = 0
+        }
+        // Geçici kopma (mobil arka plan vb.) — sadece initiator yeniden dener
+        if ((state === 'disconnected' || state === 'failed') && isInitiator) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = setTimeout(tryReconnect, state === 'failed' ? 1000 : 3000)
+        }
+      }
+
+      function buildPeer() {
+        if (peer) { peer._onConnChange = () => {}; peer.close() }
+        peer = new PeerConnection({
+          onDataChannel:      (dc) => setupDC(dc),
+          onConnectionChange: onConnChange,
+          onIceCandidate:     (candidate) => socket.emit('ice_candidate', { roomId, candidate }),
+        })
+        peerRef.current = peer
+      }
+
+      // Odada zaten olan taraf: temiz bağlantı kurup offer üretir
+      async function becomeInitiator() {
+        clearTimeout(reconnectTimer)
+        isInitiator = true
+        buildPeer()
+        setConnState('connecting')
+        peer.createDataChannel('linkdrive') // onDataChannel → setupDC
+        try {
+          const offer = await peer.createOffer()
+          socket.emit('offer', { roomId, offer })
+          addMsg('→ Offer gönderildi.')
+        } catch { addMsg('Offer üretilemedi.') }
+      }
+
+      // Yeni katılan taraf: gelen offer'a temiz bağlantıyla cevap verir
+      async function becomeAnswerer(offer) {
+        isInitiator = false
+        buildPeer()
+        setConnState('connecting')
+        try {
+          const answer = await peer.handleOffer(offer)
+          socket.emit('answer', { roomId, answer })
+          addMsg('→ Answer gönderildi.')
+        } catch { addMsg('Answer üretilemedi.') }
+      }
+
       async function tryReconnect() {
-        if (destroyed || roleRef.current !== 'host') return
-        if (peer.connectionState === 'connected') { reconnectAttempts = 0; return }
+        if (destroyed || !isInitiator) return
+        if (peer?.connectionState === 'connected') { reconnectAttempts = 0; return }
         if (reconnectAttempts >= 6) {
           addMsg('⚠ Yeniden bağlanılamadı — sayfayı yenileyin.')
           return
         }
         reconnectAttempts++
         addMsg(`⟳ Yeniden bağlanılıyor (${reconnectAttempts})...`)
-        try {
-          const offer = await peer.restartIce()
-          socket.emit('offer', { roomId, offer })
-        } catch { /* tekrar denenecek */ }
-        reconnectTimer = setTimeout(tryReconnect, 4000)
+        await becomeInitiator()
+        reconnectTimer = setTimeout(tryReconnect, 5000)
       }
 
-      const peer = new PeerConnection({
-        onDataChannel:    (dc) => setupDC(dc),
-        onConnectionChange: (state) => {
-          if (destroyed) return
-          setConnState(state)
-          addMsg(`⟳ Bağlantı: ${state}`)
-
-          if (state === 'connected') {
-            clearTimeout(reconnectTimer)
-            reconnectAttempts = 0
-          }
-          // Geçici kopma — host ICE restart ile kurtarmayı dener
-          if (state === 'disconnected' || state === 'failed') {
-            if (roleRef.current === 'host') {
-              clearTimeout(reconnectTimer)
-              reconnectTimer = setTimeout(tryReconnect, state === 'failed' ? 800 : 3000)
-            }
-          }
-        },
-        onIceCandidate: (candidate) => {
-          socket.emit('ice_candidate', { roomId, candidate })
-        },
-      })
-      peerRef.current = peer
+      buildPeer() // başlangıç peer'i
 
       socket.on('connect', () => {
         if (destroyed) return
@@ -162,41 +189,40 @@ export function useRoom(roomId, secretKey) {
         roleRef.current = 'host'
         setRole('host')
         setConnState('waiting')
-        addMsg('✓ Oda oluşturuldu — HOST olarak bekleniyor...')
-        peer.createDataChannel('linkdrive') // onDataChannel callback setupDC'yi çağırır
+        addMsg('✓ Oda oluşturuldu — bekleniyor...')
       })
 
+      // Ben zaten odadaydım, yeni biri katıldı → initiator olup offer üretirim
       socket.on('peer_joined', async ({ peerCount }) => {
         if (destroyed) return
         addMsg(`✓ Peer katıldı (toplam: ${peerCount}).`)
-        if (roleRef.current === 'host' && peerCount === 2) {
-          setConnState('connecting')
-          const offer = await peer.createOffer()
-          socket.emit('offer', { roomId, offer })
-          addMsg('→ Offer gönderildi.')
-        }
+        await becomeInitiator()
       })
 
-      socket.on('offer', async ({ offer }) => {
+      // Ben yeni katıldım → offer beklerim
+      socket.on('room_joined', ({ peerCount }) => {
         if (destroyed) return
         roleRef.current = 'guest'
         setRole('guest')
         setConnState('connecting')
-        addMsg('← Offer alındı. Answer üretiliyor...')
-        const answer = await peer.handleOffer(offer)
-        socket.emit('answer', { roomId, answer })
-        addMsg('→ Answer gönderildi.')
+        addMsg(`✓ Odaya katıldım (toplam: ${peerCount}) — offer bekleniyor...`)
+      })
+
+      socket.on('offer', async ({ offer }) => {
+        if (destroyed) return
+        addMsg('← Offer alındı.')
+        await becomeAnswerer(offer)
       })
 
       socket.on('answer', async ({ answer }) => {
         if (destroyed) return
         addMsg('← Answer alındı.')
-        await peer.handleAnswer(answer)
+        try { await peer.handleAnswer(answer) } catch {}
       })
 
       socket.on('ice_candidate', async ({ candidate }) => {
         if (destroyed) return
-        await peer.addIceCandidate(candidate)
+        try { await peer.addIceCandidate(candidate) } catch {}
       })
 
       socket.on('peer_left', () => {
@@ -230,6 +256,6 @@ export function useRoom(roomId, secretKey) {
 
   return {
     role, connState, dcReady, fatalErr, messages,
-    dcRef, sendEncrypted, registerMessageHandler, sendPing,
+    dcRef, peerRef, sendEncrypted, registerMessageHandler, sendPing,
   }
 }
