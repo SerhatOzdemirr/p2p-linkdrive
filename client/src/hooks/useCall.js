@@ -1,7 +1,7 @@
 // hooks/useCall.js — sesli/görüntülü arama (native WebRTC, renegotiation DataChannel'dan)
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-export function useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandler }) {
+export function useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandler, setDefaultTrackHandler }) {
   const [callState, setCallState]   = useState('idle') // idle | calling | incoming | active
   const [withVideo, setWithVideo]   = useState(false)
   const [muted, setMuted]           = useState(false)
@@ -9,16 +9,16 @@ export function useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandle
   const [localStream, setLocalStream]   = useState(null)
   const [remoteStream, setRemoteStream] = useState(null)
   const [error, setError]           = useState('')
+  const [sharing, setSharing]       = useState(false) // ekran paylaşımı
 
   const localStreamRef   = useRef(null)
   const incomingVideoRef = useRef(false)
+  const screenStreamRef  = useRef(null)
 
-  // Peer hazır olunca uzak track dinleyicisini bağla
+  // Arama: eşleşmeyen (varsayılan) track'ler buraya gelir
   useEffect(() => {
-    peerRef.current?.setOnTrack((e) => {
-      if (e.streams[0]) setRemoteStream(e.streams[0])
-    })
-  }, [dcReady]) // eslint-disable-line
+    setDefaultTrackHandler((e) => { if (e.streams[0]) setRemoteStream(e.streams[0]) })
+  }, []) // eslint-disable-line
 
   async function getLocal(video) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video })
@@ -33,7 +33,14 @@ export function useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandle
     setLocalStream(null)
   }
 
+  function stopScreenLocal() {
+    screenStreamRef.current?.getTracks().forEach(t => t.stop())
+    screenStreamRef.current = null
+    setSharing(false)
+  }
+
   function endCallLocal() {
+    stopScreenLocal()
     peerRef.current?.stopLocalTracks()
     cleanupLocal()
     setRemoteStream(null)
@@ -92,6 +99,40 @@ export function useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandle
     if (t) { t.enabled = !t.enabled; setCamOff(!t.enabled) }
   }
 
+  // ── Ekran paylaşımı ────────────────────────────────────────────────────────
+  async function toggleScreenShare() {
+    const peer = peerRef.current
+    if (!peer) return
+    if (sharing) { stopScreenShare(); return }
+    try {
+      const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      const track  = screen.getVideoTracks()[0]
+      screenStreamRef.current = screen
+
+      const replaced = await peer.replaceVideoTrack(track) // video çağrısı: kamera→ekran
+      if (!replaced) {
+        // Sesli çağrı: video track yok → ekle + yeniden anlaş
+        peer.addTrackToStream(track, screen)
+        const offer = await peer.createRenegotiationOffer()
+        sendEncrypted({ type: 'RTC_OFFER', sdp: offer })
+        setWithVideo(true)
+      }
+      setSharing(true)
+      // Kullanıcı tarayıcı arayüzünden durdurursa
+      track.onended = () => stopScreenShare()
+    } catch { /* kullanıcı iptal etti */ }
+  }
+
+  async function stopScreenShare() {
+    const peer = peerRef.current
+    stopScreenLocal()
+    // Kamera track'i varsa geri dön
+    const camTrack = localStreamRef.current?.getVideoTracks()[0]
+    if (camTrack && peer) {
+      try { await peer.replaceVideoTrack(camTrack) } catch {}
+    }
+  }
+
   // ── Sinyalleşme (DataChannel üzerinden) ────────────────────────────────────
   const handleMessage = useCallback(async (msg) => {
     const peer = peerRef.current
@@ -110,25 +151,18 @@ export function useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandle
       sendEncrypted({ type: 'RTC_OFFER', sdp: offer })
       setCallState('active')
     }
-    else if (msg.type === 'RTC_OFFER') {
-      const answer = await peer.handleOffer(msg.sdp)
-      sendEncrypted({ type: 'RTC_ANSWER', sdp: answer })
-    }
-    else if (msg.type === 'RTC_ANSWER') {
-      await peer.handleAnswer(msg.sdp)
-    }
     else if (msg.type === 'CALL_END') {
       endCallLocal()
     }
   }, []) // eslint-disable-line
 
   useEffect(() => {
-    ['CALL_REQUEST', 'CALL_ACCEPT', 'RTC_OFFER', 'RTC_ANSWER', 'CALL_END']
+    ['CALL_REQUEST', 'CALL_ACCEPT', 'CALL_END']
       .forEach(t => registerMessageHandler(t, handleMessage))
   }, []) // eslint-disable-line
 
   return {
-    callState, withVideo, muted, camOff, localStream, remoteStream, error,
-    startCall, acceptCall, declineCall, endCall, toggleMute, toggleCam,
+    callState, withVideo, muted, camOff, sharing, localStream, remoteStream, error,
+    startCall, acceptCall, declineCall, endCall, toggleMute, toggleCam, toggleScreenShare,
   }
 }

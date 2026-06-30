@@ -1,26 +1,30 @@
 // pages/Room.jsx
 import { useRef, useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
 import { useParams } from 'react-router-dom'
 import { useRoom } from '../hooks/useRoom.js'
 import { useFileTransfer } from '../hooks/useFileTransfer.js'
-import { useClipboard } from '../hooks/useClipboard.js'
 import { useTheme } from '../hooks/useTheme.js'
 import { useDocEditor } from '../hooks/useDocEditor.js'
 import { useChat } from '../hooks/useChat.js'
 import { useCall } from '../hooks/useCall.js'
+import { useCinema } from '../hooks/useCinema.js'
+import { useNotifications } from '../hooks/useNotifications.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
 import FileTransfer from '../components/FileTransfer.jsx'
-import ClipboardShare from '../components/ClipboardShare.jsx'
 import DocEditor from '../components/DocEditor.jsx'
 import Chat from '../components/Chat.jsx'
 import Call from '../components/Call.jsx'
+import Cinema from '../components/Cinema.jsx'
+import FloatingCall from '../components/FloatingCall.jsx'
+import { AnimatePresence } from 'framer-motion'
 
 const TABS = [
   { id: 'files',  label: 'Dosyalar' },
   { id: 'call',   label: 'Arama'    },
+  { id: 'cinema', label: 'Sinema'   },
   { id: 'chat',   label: 'Sohbet'   },
-  { id: 'text',   label: 'Metin'    },
   { id: 'editor', label: 'Editör'   },
 ]
 
@@ -33,13 +37,59 @@ export default function Room() {
   const {
     role, connState, dcReady, fatalErr,
     dcRef, peerRef, sendEncrypted, registerMessageHandler,
+    setDefaultTrackHandler, registerStreamRoute, unregisterStreamRoute,
   } = useRoom(roomId, secretKey)
 
   const fileTransfer = useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessageHandler })
-  const clipboard    = useClipboard({ dcReady, sendEncrypted, registerMessageHandler })
   const docEditor    = useDocEditor({ dcReady, sendEncrypted, registerMessageHandler })
   const chat         = useChat({ dcReady, sendEncrypted, registerMessageHandler })
-  const call         = useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandler })
+  const call         = useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandler, setDefaultTrackHandler })
+  const cinema       = useCinema({ dcReady, peerRef, sendEncrypted, registerMessageHandler, registerStreamRoute, unregisterStreamRoute })
+  const { notify }   = useNotifications()
+
+  // ── Bildirimler (arka plan/başka sekme) ──────────────────────────────────
+  // Yeni sohbet mesajı
+  const prevMsgCount = useRef(0)
+  useEffect(() => {
+    const msgs = chat.messages
+    if (msgs.length > prevMsgCount.current) {
+      const last = msgs[msgs.length - 1]
+      if (last?.from === 'peer' && (document.hidden || activeTab !== 'chat')) {
+        notify({ title: 'Yeni mesaj', body: last.text.slice(0, 80) })
+      }
+    }
+    prevMsgCount.current = msgs.length
+  }, [chat.messages]) // eslint-disable-line
+
+  // Gelen dosya
+  const prevPendingCount = useRef(0)
+  useEffect(() => {
+    const n = fileTransfer.pendingFiles.length
+    if (n > prevPendingCount.current) {
+      const f = fileTransfer.pendingFiles[n - 1]
+      notify({ title: 'Dosya geldi', body: f?.name || '' })
+    }
+    prevPendingCount.current = n
+  }, [fileTransfer.pendingFiles]) // eslint-disable-line
+
+  // Gelen arama
+  const prevCall = useRef('idle')
+  useEffect(() => {
+    if (call.callState === 'incoming' && prevCall.current !== 'incoming') {
+      notify({ title: 'Gelen arama', body: call.withVideo ? 'Görüntülü arama' : 'Sesli arama' })
+    }
+    prevCall.current = call.callState
+  }, [call.callState]) // eslint-disable-line
+
+  // Karşı taraf film başlatınca Sinema sekmesine geç + bildir
+  const prevCinema = useRef('idle')
+  useEffect(() => {
+    if (cinema.mode === 'guest' && prevCinema.current !== 'guest') {
+      setActiveTab('cinema')
+      notify({ title: 'Sinema başladı', body: cinema.movieName })
+    }
+    prevCinema.current = cinema.mode
+  }, [cinema.mode]) // eslint-disable-line
 
   // Tab badge'leri
   const filesBadge  = fileTransfer.pendingFiles.length > 0 || !!fileTransfer.incomingMeta
@@ -61,9 +111,9 @@ export default function Room() {
     prevCallState.current = call.callState
   }, [call.callState])
 
-  // Sohbet sekmesi aktifken okunmadı sayacını sıfırla
+  // Sohbet sekmesi aktifken: okundu bilgisi gönder + okunmadı sıfırla
   useEffect(() => {
-    if (activeTab === 'chat') chat.clearUnread()
+    chat.setViewing(activeTab === 'chat')
   }, [activeTab, chat.messages.length]) // eslint-disable-line
 
   if (fatalErr) {
@@ -105,9 +155,10 @@ export default function Room() {
       {/* Link paylaşımı — sadece host, her zaman görünür */}
       {role === 'host' && <ShareLink roomId={roomId} secretKey={secretKey} />}
 
-      {/* Tab çubuğu */}
+      {/* Tab çubuğu — kayan pill animasyonu (layoutId) */}
       <div className="w-full flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-2xl p-1">
         {TABS.map(tab => {
+          const active   = activeTab === tab.id
           const hasBadge = (tab.id === 'files'  && filesBadge  && activeTab !== 'files') ||
                            (tab.id === 'editor' && editorBadge && activeTab !== 'editor') ||
                            (tab.id === 'chat'   && chatBadge   && activeTab !== 'chat') ||
@@ -117,16 +168,27 @@ export default function Room() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`relative flex-1 py-2 text-sm font-semibold rounded-xl transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm'
+                active
+                  ? 'text-gray-900 dark:text-white'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
             >
-              {tab.label}
+              {active && (
+                <motion.span
+                  layoutId="tab-pill"
+                  className="absolute inset-0 bg-white dark:bg-gray-900 rounded-xl shadow-sm"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <span className="relative z-10">{tab.label}</span>
               {hasBadge && (
-                <span className="absolute top-1.5 right-2 min-w-[8px] h-2 px-1 flex items-center justify-center bg-red-500 rounded-full text-[9px] text-white leading-none">
+                <motion.span
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="absolute top-1.5 right-2 z-10 min-w-[8px] h-2 px-1 flex items-center justify-center bg-red-500 rounded-full text-[9px] text-white leading-none"
+                >
                   {tab.id === 'chat' && chat.unread > 0 ? chat.unread : ''}
-                </span>
+                </motion.span>
               )}
             </button>
           )
@@ -141,16 +203,28 @@ export default function Room() {
         <div style={{ gridArea: '1/1' }} className={activeTab === 'call'   ? '' : 'invisible pointer-events-none'}>
           <Call dcReady={dcReady} {...call} />
         </div>
+        <div style={{ gridArea: '1/1' }} className={activeTab === 'cinema' ? '' : 'invisible pointer-events-none'}>
+          <Cinema dcReady={dcReady} {...cinema} />
+        </div>
         <div style={{ gridArea: '1/1' }} className={activeTab === 'chat'   ? '' : 'invisible pointer-events-none'}>
           <Chat dcReady={dcReady} {...chat} />
-        </div>
-        <div style={{ gridArea: '1/1' }} className={activeTab === 'text'   ? '' : 'invisible pointer-events-none'}>
-          <ClipboardShare dcReady={dcReady} {...clipboard} />
         </div>
         <div style={{ gridArea: '1/1' }} className={activeTab === 'editor' ? '' : 'invisible pointer-events-none'}>
           <DocEditor dcReady={dcReady} {...docEditor} />
         </div>
       </div>
+
+      {/* Görüşme aktifken başka sekmedeysen sağ altta yüzen pencere */}
+      <AnimatePresence>
+        {call.callState === 'active' && activeTab !== 'call' && (
+          <FloatingCall
+            remoteStream={call.remoteStream}
+            withVideo={call.withVideo}
+            onExpand={() => setActiveTab('call')}
+            onEnd={call.endCall}
+          />
+        )}
+      </AnimatePresence>
 
     </div>
   )

@@ -77,6 +77,34 @@ export class PeerConnection {
     }
   }
 
+  getVideoSender() {
+    return this.pc.getSenders().find(s => s.track && s.track.kind === 'video')
+  }
+
+  /** Giden video track'ini değiştir (kamera ↔ ekran) — renegotiation gerektirmez */
+  async replaceVideoTrack(track) {
+    const sender = this.getVideoSender()
+    if (sender) { await sender.replaceTrack(track); return true }
+    return false
+  }
+
+  addTrackToStream(track, stream) {
+    this.pc.addTrack(track, stream)
+  }
+
+  /** Bir track'in maksimum bitrate'ini ayarla (sinema için yüksek kalite) */
+  async setTrackMaxBitrate(track, bps) {
+    const sender = this.pc.getSenders().find(s => s.track === track)
+    if (!sender) return
+    const params = sender.getParameters()
+    if (!params.encodings || !params.encodings.length) params.encodings = [{}]
+    params.encodings[0].maxBitrate    = bps
+    params.encodings[0].maxFramerate  = 30
+    // Düşük bantta çözünürlüğü düşürmek yerine fps düşür → film daha net kalır
+    params.degradationPreference = 'maintain-resolution'
+    try { await sender.setParameters(params) } catch {}
+  }
+
   /** Host DataChannel açar */
   createDataChannel(label = 'linkdrive') {
     this.dc = this.pc.createDataChannel(label, {

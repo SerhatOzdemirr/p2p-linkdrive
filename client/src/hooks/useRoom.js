@@ -18,6 +18,10 @@ export function useRoom(roomId, secretKey) {
   const keyRef      = useRef(null)
   const handlersRef = useRef({}) // mesaj tipi → handler
 
+  // Gelen medya track'lerini doğru tüketiciye dağıt (arama vs sinema)
+  const trackRoutesRef  = useRef(new Map()) // streamId → handler
+  const defaultTrackRef = useRef(null)      // eşleşme yoksa (arama)
+
   const addMsg = useCallback((text, from = 'system') => {
     setMessages(prev => [...prev, { text, from, ts: Date.now() }])
   }, [])
@@ -27,6 +31,11 @@ export function useRoom(roomId, secretKey) {
     handlersRef.current[type] = handler
   }, [])
 
+  // Medya tüketicileri kayıt API'si
+  const setDefaultTrackHandler = useCallback((fn) => { defaultTrackRef.current = fn }, [])
+  const registerStreamRoute   = useCallback((sid, fn) => { trackRoutesRef.current.set(sid, fn) }, [])
+  const unregisterStreamRoute = useCallback((sid) => { trackRoutesRef.current.delete(sid) }, [])
+
   const sendEncrypted = useCallback(async (msg) => {
     const dc = dcRef.current
     if (!dc || dc.readyState !== 'open') return
@@ -34,6 +43,23 @@ export function useRoom(roomId, secretKey) {
     const buf = await encrypt(keyRef.current, encoded)
     try { dc.send(buf) } catch { /* buffer full — caller'ın backpressure'ı yakalaması lazım */ }
   }, [])
+
+  // Medya yeniden anlaşması (arama/sinema track ekleme) — mevcut PC üstünde, rebuild yok
+  useEffect(() => {
+    handlersRef.current['RTC_OFFER'] = async (msg) => {
+      const p = peerRef.current
+      if (!p) return
+      try {
+        const answer = await p.handleOffer(msg.sdp)
+        await sendEncrypted({ type: 'RTC_ANSWER', sdp: answer })
+      } catch {}
+    }
+    handlersRef.current['RTC_ANSWER'] = async (msg) => {
+      const p = peerRef.current
+      if (!p) return
+      try { await p.handleAnswer(msg.sdp) } catch {}
+    }
+  }, []) // eslint-disable-line
 
   const sendPing = useCallback(async (text) => {
     await sendEncrypted({ type: 'PING', text })
@@ -136,6 +162,12 @@ export function useRoom(roomId, secretKey) {
           onDataChannel:      (dc) => setupDC(dc),
           onConnectionChange: onConnChange,
           onIceCandidate:     (candidate) => socket.emit('ice_candidate', { roomId, candidate }),
+        })
+        // Gelen track'i streamId'ye göre yönlendir (sinema) yoksa varsayılana (arama)
+        peer.setOnTrack((e) => {
+          const sid   = e.streams[0]?.id
+          const route = (sid && trackRoutesRef.current.get(sid)) || defaultTrackRef.current
+          route?.(e)
         })
         peerRef.current = peer
       }
@@ -303,5 +335,6 @@ export function useRoom(roomId, secretKey) {
   return {
     role, connState, dcReady, fatalErr, messages,
     dcRef, peerRef, sendEncrypted, registerMessageHandler, sendPing,
+    setDefaultTrackHandler, registerStreamRoute, unregisterStreamRoute,
   }
 }

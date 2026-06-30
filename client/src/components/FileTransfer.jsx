@@ -1,5 +1,6 @@
 // components/FileTransfer.jsx — pure UI
 import { useState, memo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { isEditable } from '../hooks/useDocEditor.js'
 import { isHeicName, convertAndDownload } from '../core/heic.js'
 import { zipAndDownload } from '../core/zip.js'
@@ -378,34 +379,44 @@ export default function FileTransfer({
               </button>
             )}
           </div>
-          {pendingFiles.map(f => (
-            <div key={f.id} className="bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden">
-              <div className="w-full bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-2 min-h-[80px]">
-                {f.previewUrl ? (
-                  <img src={f.previewUrl} alt="önizleme" className="max-h-52 max-w-full object-contain rounded" />
-                ) : (
-                  <div className="flex flex-col items-center gap-1 py-3">
-                    <FileIcon mime={f.mime} />
-                    <span className="text-xs text-gray-400 dark:text-gray-600">Önizleme yükleniyor…</span>
+          <AnimatePresence initial={false}>
+            {pendingFiles.map(f => (
+              <motion.div
+                key={f.id}
+                layout
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, height: 0 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                className="bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden"
+              >
+                <div className="w-full bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-2 min-h-[80px]">
+                  {f.previewUrl ? (
+                    <img src={f.previewUrl} alt="önizleme" className="max-h-52 max-w-full object-contain rounded" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1 py-3">
+                      <FileIcon mime={f.mime} />
+                      <span className="text-xs text-gray-400 dark:text-gray-600">Önizleme yükleniyor…</span>
+                    </div>
+                  )}
+                </div>
+                <div className="p-3 flex items-center justify-between gap-3">
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm text-gray-900 dark:text-white font-medium truncate">{f.name}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-500">{fmtBytes(f.size)}</span>
                   </div>
-                )}
-              </div>
-              <div className="p-3 flex items-center justify-between gap-3">
-                <div className="flex flex-col min-w-0">
-                  <span className="text-sm text-gray-900 dark:text-white font-medium truncate">{f.name}</span>
-                  <span className="text-xs text-gray-500 dark:text-gray-500">{fmtBytes(f.size)}</span>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => declineFile(f.id)} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors">
+                      Reddet
+                    </button>
+                    <button onClick={() => acceptFile(f.id)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors">
+                      İndir
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => declineFile(f.id)} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors">
-                    Reddet
-                  </button>
-                  <button onClick={() => acceptFile(f.id)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors">
-                    İndir
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
       )}
       {/* /pending files */}
