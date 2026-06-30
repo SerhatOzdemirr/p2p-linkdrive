@@ -98,10 +98,10 @@ export class PeerConnection {
     if (!sender) return
     const params = sender.getParameters()
     if (!params.encodings || !params.encodings.length) params.encodings = [{}]
-    params.encodings[0].maxBitrate    = bps
-    params.encodings[0].maxFramerate  = 30
-    // Düşük bantta çözünürlüğü düşürmek yerine fps düşür → film daha net kalır
-    params.degradationPreference = 'maintain-resolution'
+    params.encodings[0].maxBitrate   = bps
+    params.encodings[0].maxFramerate = 30
+    // Akıcılık öncelikli: bant düşünce çözünürlüğü kıs ama fps'i koru → film takılmaz
+    params.degradationPreference = 'balanced'
     try { await sender.setParameters(params) } catch {}
   }
 

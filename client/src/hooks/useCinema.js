@@ -1,7 +1,7 @@
 // hooks/useCinema.js — beraber izleme: ekran/sekme paylaşımı (YouTube vb.) WebRTC ile
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-const CINEMA_BITRATE = 12 * 1000 * 1000 // 12 Mbps — yüksek kalite 1080p
+const CINEMA_BITRATE = 4 * 1000 * 1000 // 4 Mbps — akıcılık öncelikli (takılmasın)
 
 export function useCinema({
   peerRef, sendEncrypted, registerMessageHandler,
