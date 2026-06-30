@@ -1,7 +1,7 @@
 // hooks/useCinema.js — beraber izleme: ekran/sekme paylaşımı (YouTube vb.) WebRTC ile
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-const CINEMA_BITRATE = 4 * 1000 * 1000 // 4 Mbps — akıcılık öncelikli (takılmasın)
+const CINEMA_BITRATE = 2.5 * 1000 * 1000 // 2.5 Mbps — 720p için bol bol yeter
 
 export function useCinema({
   peerRef, sendEncrypted, registerMessageHandler,
@@ -44,8 +44,9 @@ export function useCinema({
     try {
       setError('')
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30, max: 60 }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, // film/müzik sesi bozulmasın
+        // 720p/30fps — Discord'un "akıcı" modu; encode yükü düşük, takılmaz
+        video: { frameRate: { ideal: 30, max: 30 }, width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 } },
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       })
       shareStreamRef.current = stream
       streamIdRef.current    = stream.id
