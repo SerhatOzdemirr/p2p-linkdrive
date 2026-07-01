@@ -21,7 +21,11 @@ export function useCinema({
       streamIdRef.current = msg.streamId
       setMovieName(msg.name || 'İzleme')
       setMode('guest')
-      registerStreamRoute(msg.streamId, (e) => setRemoteStream(e.streams[0]))
+      registerStreamRoute(msg.streamId, (e) => {
+        // Jitter buffer'ı kıs → canlı izlemede latency düşer (Chrome)
+        try { if ('playoutDelayHint' in e.receiver) e.receiver.playoutDelayHint = 0 } catch {}
+        setRemoteStream(e.streams[0])
+      })
     }
     else if (msg.type === 'CINEMA_STOP') {
       if (streamIdRef.current) unregisterStreamRoute(streamIdRef.current)
@@ -44,8 +48,8 @@ export function useCinema({
     try {
       setError('')
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        // 720p/30fps — Discord'un "akıcı" modu; encode yükü düşük, takılmaz
-        video: { frameRate: { ideal: 30, max: 30 }, width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 } },
+        // 720p/24fps — film 24fps zaten; düşük encode yükü + düşük latency
+        video: { frameRate: { ideal: 24, max: 30 }, width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 } },
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       })
       shareStreamRef.current = stream
@@ -59,6 +63,7 @@ export function useCinema({
       const v = stream.getVideoTracks()[0]
       if (v) {
         v.contentHint = 'motion' // film/hareketli içerik → kodlayıcı buna göre ayarlar
+        peer.preferVideoCodec('H264') // donanım hızlandırma → düşük CPU/latency
         await peer.setTrackMaxBitrate(v, CINEMA_BITRATE)
         v.onended = () => stopShare() // tarayıcının "paylaşımı durdur"u
       }

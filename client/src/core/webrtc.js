@@ -92,6 +92,20 @@ export class PeerConnection {
     this.pc.addTrack(track, stream)
   }
 
+  /** Video codec'ini tercih et (H264 = donanım hızlandırma → düşük CPU/latency) */
+  preferVideoCodec(name = 'H264') {
+    try {
+      const caps = RTCRtpReceiver.getCapabilities?.('video')
+      if (!caps) return
+      const want = `video/${name.toLowerCase()}`
+      const pref = caps.codecs.filter(c => c.mimeType.toLowerCase() === want)
+      const rest = caps.codecs.filter(c => c.mimeType.toLowerCase() !== want)
+      if (!pref.length) return
+      const tx = this.pc.getTransceivers().find(t => t.sender?.track?.kind === 'video')
+      tx?.setCodecPreferences?.([...pref, ...rest])
+    } catch {}
+  }
+
   /** Bir track'in maksimum bitrate'ini ayarla (sinema için yüksek kalite) */
   async setTrackMaxBitrate(track, bps) {
     const sender = this.pc.getSenders().find(s => s.track === track)
