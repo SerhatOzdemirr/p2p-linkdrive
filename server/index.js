@@ -35,8 +35,54 @@ function isRateLimited(socketId, max = 30) {
   return e.count > max
 }
 
+// ── Yakındaki cihazlar (aynı public IP = aynı ağ, Snapdrop mantığı) ─────────
+const ADJ = ['Mavi', 'Kızıl', 'Yeşil', 'Mor', 'Altın', 'Gümüş', 'Hızlı', 'Sakin', 'Neşeli', 'Bilge'];
+const ANIMAL = ['Tilki', 'Kartal', 'Panda', 'Kurt', 'Kedi', 'Baykuş', 'Aslan', 'Yunus', 'Kaplan', 'Ayı'];
+const EMOJI = ['🦊', '🦅', '🐼', '🐺', '🐱', '🦉', '🦁', '🐬', '🐯', '🐻'];
+const ipGroups = new Map(); // ip → Map(socketId → {name, emoji})
+
+function clientIp(socket) {
+  const fwd = socket.handshake.headers['x-forwarded-for'];
+  return (fwd ? fwd.split(',')[0].trim() : socket.handshake.address) || 'unknown';
+}
+
+function nearbyList(ip, exceptId) {
+  const g = ipGroups.get(ip);
+  if (!g) return [];
+  return [...g.entries()]
+    .filter(([id]) => id !== exceptId)
+    .map(([id, info]) => ({ id, name: info.name, emoji: info.emoji }));
+}
+
+function broadcastNearby(ip) {
+  const g = ipGroups.get(ip);
+  if (!g) return;
+  for (const id of g.keys()) {
+    io.to(id).emit('nearby_peers', { peers: nearbyList(ip, id) });
+  }
+}
+
 io.on('connection', (socket) => {
   console.log(`[+] Bağlandı: ${socket.id}`);
+
+  // Yakındaki cihazlar grubuna kat
+  const ip    = clientIp(socket);
+  const i     = Math.floor(Math.random() * ANIMAL.length);
+  const info  = { name: `${ADJ[Math.floor(Math.random() * ADJ.length)]} ${ANIMAL[i]}`, emoji: EMOJI[i] };
+  socket.data.ip = ip;
+  if (!ipGroups.has(ip)) ipGroups.set(ip, new Map());
+  ipGroups.get(ip).set(socket.id, info);
+  socket.emit('nearby_self', { id: socket.id, ...info });
+  broadcastNearby(ip);
+
+  // Cihaza tıklandı → odaya davet et (roomId + anahtar karşıya iletilir)
+  socket.on('nearby_invite', ({ targetId, roomId, key }, ack) => {
+    if (isRateLimited(socket.id)) return;
+    if (!targetId || !roomId || !ROOM_ID_RE.test(roomId)) return;
+    const me = ipGroups.get(socket.data.ip)?.get(socket.id);
+    io.to(targetId).emit('nearby_invited', { roomId, key, fromName: me?.name, fromEmoji: me?.emoji });
+    if (typeof ack === 'function') ack({ ok: true });
+  });
 
   // ── Oda oluştur ─────────────────────────────────────────────────────────
   socket.on('create_room', ({ roomId }) => {
@@ -123,6 +169,13 @@ io.on('connection', (socket) => {
     console.log(`[-] Ayrıldı: ${socket.id}`);
     socketRates.delete(socket.id);
     handleLeave(socket);
+    // Yakındaki cihazlar grubundan çıkar
+    const g = ipGroups.get(socket.data.ip);
+    if (g) {
+      g.delete(socket.id);
+      if (g.size === 0) ipGroups.delete(socket.data.ip);
+      else broadcastNearby(socket.data.ip);
+    }
   });
 });
 

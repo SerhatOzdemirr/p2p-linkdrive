@@ -8,7 +8,6 @@ import { useTheme } from '../hooks/useTheme.js'
 import { useDocEditor } from '../hooks/useDocEditor.js'
 import { useChat } from '../hooks/useChat.js'
 import { useCall } from '../hooks/useCall.js'
-import { useCinema } from '../hooks/useCinema.js'
 import { useNotifications } from '../hooks/useNotifications.js'
 import ShareLink from '../components/ShareLink.jsx'
 import ConnectionStatus from '../components/ConnectionStatus.jsx'
@@ -16,14 +15,12 @@ import FileTransfer from '../components/FileTransfer.jsx'
 import DocEditor from '../components/DocEditor.jsx'
 import Chat from '../components/Chat.jsx'
 import Call from '../components/Call.jsx'
-import Cinema from '../components/Cinema.jsx'
 import FloatingCall from '../components/FloatingCall.jsx'
 import { AnimatePresence } from 'framer-motion'
 
 const TABS = [
   { id: 'files',  label: 'Dosyalar' },
   { id: 'call',   label: 'Arama'    },
-  { id: 'cinema', label: 'Sinema'   },
   { id: 'chat',   label: 'Sohbet'   },
   { id: 'editor', label: 'Editör'   },
 ]
@@ -37,14 +34,13 @@ export default function Room() {
   const {
     role, connState, dcReady, fatalErr,
     dcRef, peerRef, sendEncrypted, registerMessageHandler,
-    setDefaultTrackHandler, registerStreamRoute, unregisterStreamRoute,
+    setDefaultTrackHandler,
   } = useRoom(roomId, secretKey)
 
   const fileTransfer = useFileTransfer({ dcReady, dcRef, sendEncrypted, registerMessageHandler })
   const docEditor    = useDocEditor({ dcReady, sendEncrypted, registerMessageHandler })
   const chat         = useChat({ dcReady, sendEncrypted, registerMessageHandler })
   const call         = useCall({ dcReady, peerRef, sendEncrypted, registerMessageHandler, setDefaultTrackHandler })
-  const cinema       = useCinema({ dcReady, peerRef, sendEncrypted, registerMessageHandler, registerStreamRoute, unregisterStreamRoute })
   const { notify }   = useNotifications()
 
   // ── Bildirimler (arka plan/başka sekme) ──────────────────────────────────
@@ -80,16 +76,6 @@ export default function Room() {
     }
     prevCall.current = call.callState
   }, [call.callState]) // eslint-disable-line
-
-  // Karşı taraf film başlatınca Sinema sekmesine geç + bildir
-  const prevCinema = useRef('idle')
-  useEffect(() => {
-    if (cinema.mode === 'guest' && prevCinema.current !== 'guest') {
-      setActiveTab('cinema')
-      notify({ title: 'Sinema başladı', body: cinema.movieName })
-    }
-    prevCinema.current = cinema.mode
-  }, [cinema.mode]) // eslint-disable-line
 
   // Tab badge'leri
   const filesBadge  = fileTransfer.pendingFiles.length > 0 || !!fileTransfer.incomingMeta
@@ -202,9 +188,6 @@ export default function Room() {
         </div>
         <div style={{ gridArea: '1/1' }} className={activeTab === 'call'   ? '' : 'invisible pointer-events-none'}>
           <Call dcReady={dcReady} {...call} />
-        </div>
-        <div style={{ gridArea: '1/1' }} className={activeTab === 'cinema' ? '' : 'invisible pointer-events-none'}>
-          <Cinema dcReady={dcReady} {...cinema} />
         </div>
         <div style={{ gridArea: '1/1' }} className={activeTab === 'chat'   ? '' : 'invisible pointer-events-none'}>
           <Chat dcReady={dcReady} {...chat} />

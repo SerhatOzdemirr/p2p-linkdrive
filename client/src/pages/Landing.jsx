@@ -1,12 +1,15 @@
 // pages/Landing.jsx
 import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { generateHex } from '../core/crypto.js'
 import { useTheme } from '../hooks/useTheme.js'
+import { useNearby } from '../hooks/useNearby.js'
 
 export default function Landing() {
   const [joinInput, setJoinInput] = useState('')
   const [error, setError]         = useState('')
   const { dark, toggle }          = useTheme()
+  const { self, peers, invite }   = useNearby()
 
   function handleCreate() {
     const roomId    = generateHex(16) // 32 hex char
@@ -67,6 +70,54 @@ export default function Landing() {
       </div>
 
       <div className="w-full max-w-md flex flex-col gap-4">
+
+        {/* Yakındaki cihazlar — aynı ağda otomatik keşif */}
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Yakındaki Cihazlar
+            </h2>
+            {self && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                Sen: {self.emoji} {self.name}
+              </span>
+            )}
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
+            Aynı WiFi'deki cihaza tıkla — link paylaşmaya gerek yok.
+          </p>
+
+          {peers.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-6 text-center">
+              <div className="relative w-16 h-16 flex items-center justify-center">
+                <span className="absolute inset-0 rounded-full border-2 border-emerald-400/40 animate-ping" />
+                <span className="text-2xl">📡</span>
+              </div>
+              <span className="text-xs text-gray-400 dark:text-gray-600">
+                Aynı ağdaki cihazlar aranıyor…
+              </span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              <AnimatePresence>
+                {peers.map(p => (
+                  <motion.button
+                    key={p.id}
+                    onClick={() => invite(p.id)}
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    whileTap={{ scale: 0.92 }}
+                    className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-emerald-950 hover:ring-2 hover:ring-emerald-400 transition-all"
+                  >
+                    <span className="text-3xl">{p.emoji}</span>
+                    <span className="text-xs text-gray-700 dark:text-gray-300 text-center leading-tight">{p.name}</span>
+                  </motion.button>
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
 
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Klasör Paylaş</h2>
