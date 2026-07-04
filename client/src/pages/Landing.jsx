@@ -4,12 +4,15 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { generateHex } from '../core/crypto.js'
 import { useTheme } from '../hooks/useTheme.js'
 import { useNearby } from '../hooks/useNearby.js'
+import { useInstallPrompt } from '../hooks/useInstallPrompt.js'
 
 export default function Landing() {
   const [joinInput, setJoinInput] = useState('')
   const [error, setError]         = useState('')
+  const [showIosHint, setShowIosHint] = useState(false)
   const { dark, toggle }          = useTheme()
   const { self, peers, invite }   = useNearby()
+  const { canInstall, install, installed, isIOS } = useInstallPrompt()
 
   function handleCreate() {
     const roomId    = generateHex(16) // 32 hex char
@@ -67,6 +70,26 @@ export default function Landing() {
         <p className="mt-2 text-gray-500 dark:text-gray-400 text-sm">
           Sıfır Bilgi · Sunucusuz · Tarayıcıdan Tarayıcıya
         </p>
+
+        {/* Uygulamayı Yükle (PWA) */}
+        {!installed && (canInstall || isIOS) && (
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <button
+              onClick={() => (isIOS ? setShowIosHint(v => !v) : install())}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Uygulamayı Yükle
+            </button>
+            {isIOS && showIosHint && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 max-w-xs text-center">
+                Safari'de <b>Paylaş</b> → <b>Ana Ekrana Ekle</b> ile kur.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="w-full max-w-md flex flex-col gap-4">
