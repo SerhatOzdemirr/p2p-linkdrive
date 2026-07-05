@@ -42,7 +42,6 @@ export default function Chat({
   setReplyTo, cancelReply,
 }) {
   const bottomRef = useRef(null)
-  const fsRef     = useRef(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showThemes, setShowThemes] = useState(false)
   const [isFs, setIsFs] = useState(false)
@@ -52,19 +51,13 @@ export default function Chat({
 
   useEffect(() => { localStorage.setItem('chat_theme', theme) }, [theme])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, peerTyping])
-  useEffect(() => {
-    const onFs = () => setIsFs(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
 
-  function toggleFullscreen() {
-    if (!document.fullscreenElement) fsRef.current?.requestFullscreen?.().catch(() => {})
-    else document.exitFullscreen?.()
-  }
+  // CSS tam ekran (Fullscreen API değil) — mobilde klavye açılınca alan küçülür, input görünür kalır
+  function toggleFullscreen() { setIsFs(v => !v) }
 
   return (
-    <div ref={fsRef} className={`w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 flex flex-col gap-3 ${isFs ? 'h-screen rounded-none' : ''}`}>
+    <div className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 flex flex-col gap-3 ${
+      isFs ? 'fixed inset-0 z-50 h-[100dvh] rounded-none p-3' : 'w-full rounded-2xl p-4'}`}>
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase tracking-wider">Sohbet</p>
         <div className="flex items-center gap-1">
@@ -183,6 +176,7 @@ export default function Chat({
           value={input}
           onChange={e => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onFocus={() => setTimeout(() => bottomRef.current?.scrollIntoView({ block: 'end' }), 300)}
           disabled={!dcReady}
           rows={1}
           placeholder={dcReady ? 'Mesaj yaz… (Enter gönder, Shift+Enter satır)' : 'Bağlantı bekleniyor...'}
