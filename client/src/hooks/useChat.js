@@ -2,10 +2,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
 export function useChat({ dcReady, sendEncrypted, registerMessageHandler }) {
-  const [messages, setMessages] = useState([]) // { from, text, ts, status? }
+  const [messages, setMessages] = useState([]) // { from, text, ts, status?, replyTo? }
   const [input, setInput]       = useState('')
   const [peerTyping, setPeerTyping] = useState(false)
   const [unread, setUnread]     = useState(0)
+  const [replyingTo, setReplyingTo] = useState(null) // { text, from } | null
 
   const typingTimerRef    = useRef(null)
   const selfTypingSentRef = useRef(false)
@@ -22,7 +23,7 @@ export function useChat({ dcReady, sendEncrypted, registerMessageHandler }) {
   const handleMessage = useCallback((msg) => {
     if (msg.type === 'CHAT_MSG') {
       lastPeerTsRef.current = msg.ts
-      setMessages(prev => [...prev, { from: 'peer', text: msg.text, ts: msg.ts }])
+      setMessages(prev => [...prev, { from: 'peer', text: msg.text, ts: msg.ts, replyTo: msg.replyTo || null }])
       setPeerTyping(false)
       sendEncrypted({ type: 'CHAT_DELIVERED', ts: msg.ts }) // ✓✓ ulaştı
       if (viewingRef.current) {
@@ -57,9 +58,11 @@ export function useChat({ dcReady, sendEncrypted, registerMessageHandler }) {
     if (!text || !dcReady) return
     const ts = Math.max(Date.now(), lastTsRef.current + 1) // benzersiz + artan
     lastTsRef.current = ts
-    setMessages(prev => [...prev, { from: 'self', text, ts, status: 'sent' }])
-    sendEncrypted({ type: 'CHAT_MSG', text, ts })
+    const replyTo = replyingTo ? { text: replyingTo.text, from: replyingTo.from } : null
+    setMessages(prev => [...prev, { from: 'self', text, ts, status: 'sent', replyTo }])
+    sendEncrypted({ type: 'CHAT_MSG', text, ts, replyTo })
     setInput('')
+    setReplyingTo(null)
     selfTypingSentRef.current = false
   }
 
@@ -93,7 +96,9 @@ export function useChat({ dcReady, sendEncrypted, registerMessageHandler }) {
   }, [dcReady]) // eslint-disable-line
 
   return {
-    messages, input, peerTyping, unread,
+    messages, input, peerTyping, unread, replyingTo,
     handleInputChange, send, handleKeyDown, insertEmoji, setViewing,
+    setReplyTo: (m) => setReplyingTo({ text: m.text, from: m.from }),
+    cancelReply: () => setReplyingTo(null),
   }
 }
