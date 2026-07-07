@@ -245,8 +245,8 @@ export default function FileTransfer({
   waitingAccept, queuedFiles, batchTotal, batchDone,
   pendingFiles, receivedFiles,
   incomingMeta, recvProgress, recvSpeed, recvEta,
-  dragOver, setDragOver,
-  handleDrop, handleInput,
+  dragOver, setDragOver, resumeRequest,
+  handleDrop, handleInput, handleResumeFile, dismissResume,
   cancelTransfer,
   acceptFile, declineFile, acceptAll, autoAccept, disableAutoAccept, removeFromQueue,
   onEditFile,
@@ -256,6 +256,25 @@ export default function FileTransfer({
   return (
     <div className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 flex flex-col gap-4">
       <p className="text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase tracking-wider">Dosya Transferi</p>
+
+      {/* Yarım kalan transfer — dosyayı tekrar seç (sayfa yenilenmişse) */}
+      {resumeRequest && (
+        <div className="bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-800 rounded-xl p-3 flex flex-col gap-2">
+          <p className="text-sm text-amber-700 dark:text-amber-300 font-medium">↻ Yarım kalan transfer</p>
+          <p className="text-xs text-gray-600 dark:text-gray-400">
+            <b className="text-gray-900 dark:text-white">{resumeRequest.name}</b> — karşı taraf {resumeRequest.fromChunk} parça almış. Kaldığı yerden devam için aynı dosyayı seç.
+          </p>
+          <div className="flex gap-2">
+            <label className="cursor-pointer px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">
+              Dosyayı Seç
+              <input type="file" className="hidden" onChange={handleResumeFile} />
+            </label>
+            <button onClick={dismissResume} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-semibold rounded-lg transition-colors">
+              Vazgeç
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Drop zone */}
       <label

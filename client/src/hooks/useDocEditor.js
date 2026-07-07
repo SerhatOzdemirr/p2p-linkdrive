@@ -5,7 +5,7 @@ const MAX_EDIT_SIZE = 10 * 1024 * 1024  // 10 MB
 const DOC_CHUNK     = 32 * 1024
 
 const EDITABLE_EXTS = new Set([
-  '.txt', '.md', '.markdown', '.log', '.csv', '.tsv', '.json', '.json5',
+  '.txt', '.md', '.markdown', '.log', '.json', '.json5',
   '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.html', '.htm', '.css', '.scss', '.less',
   '.py', '.java', '.c', '.h', '.cpp', '.hpp', '.cs', '.go', '.rs', '.rb', '.php', '.swift',
   '.kt', '.kts', '.lua', '.pl', '.r', '.dart', '.vue', '.svelte',
@@ -21,7 +21,7 @@ const LANG = {
   php: 'PHP', swift: 'Swift', kt: 'Kotlin', lua: 'Lua', r: 'R', dart: 'Dart',
   html: 'HTML', css: 'CSS', scss: 'SCSS', json: 'JSON', xml: 'XML', svg: 'SVG',
   yaml: 'YAML', yml: 'YAML', toml: 'TOML', sql: 'SQL', sh: 'Shell', bash: 'Shell',
-  md: 'Markdown', csv: 'CSV', tsv: 'TSV', vue: 'Vue', svelte: 'Svelte',
+  md: 'Markdown', vue: 'Vue', svelte: 'Svelte',
 }
 export function detectLang(name = '') {
   const dot = name.lastIndexOf('.')

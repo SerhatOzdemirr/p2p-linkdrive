@@ -24,6 +24,7 @@ export default function DocEditor({
   const [commentText, setCommentText] = useState('')
   const [flashLine, setFlashLine] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [isFs, setIsFs] = useState(false)
 
   useEffect(() => { localStorage.setItem('editor_theme', theme) }, [theme])
   useEffect(() => {
@@ -88,7 +89,8 @@ export default function DocEditor({
   }
 
   return (
-    <div className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden flex flex-col">
+    <div className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col ${
+      isFs ? 'fixed inset-0 z-50 h-[100dvh] rounded-none' : 'w-full rounded-2xl'}`}>
 
       {/* Başlık */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 gap-2">
@@ -98,6 +100,7 @@ export default function DocEditor({
           {peerTyping && <span className="text-xs text-emerald-500 shrink-0">✎ yazıyor…</span>}
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <button onClick={() => setIsFs(v => !v)} title={isFs ? 'Çık' : 'Tam ekran'} className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-xs">{isFs ? '🗗' : '⛶'}</button>
           <button onClick={() => setShowThemes(v => !v)} title="Tema" className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-xs">🎨</button>
           <button onClick={toggleLock} title="Düzenlemeyi kilitle"
             className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs transition-colors ${locked ? 'bg-amber-500 text-white' : 'bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700'}`}>
@@ -130,7 +133,7 @@ export default function DocEditor({
       )}
 
       {/* Editör gövdesi: gutter + textarea */}
-      <div className={`flex h-[440px] ${t.wrap}`}>
+      <div className={`flex ${isFs ? 'flex-1 min-h-0' : 'h-[440px]'} ${t.wrap}`}>
         {/* Satır numaraları (tıkla → yorum) */}
         <div ref={gutterRef} className={`overflow-hidden select-none text-right ${t.gutter} font-mono text-xs`} style={{ width: 44 }}>
           <div style={{ paddingTop: 8, paddingBottom: 8 }}>
